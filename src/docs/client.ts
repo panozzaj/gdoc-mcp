@@ -66,12 +66,19 @@ export async function editDoc(
   const response = await docs.documents.get({ documentId: docId });
   const doc = response.data;
 
-  // 3. Find the text to replace (fails if text no longer exists)
+  // 3. Find the text to replace (fails if text no longer exists or is ambiguous)
   const range = findTextRange(doc, oldText);
   if (!range) {
     throw new Error(
       `Text not found in document: "${oldText.slice(0, 100)}${oldText.length > 100 ? '...' : ''}"\n` +
       `The document may have been modified. Try reading it again.`
+    );
+  }
+
+  if (range.matchCount > 1) {
+    throw new Error(
+      `Text appears ${range.matchCount} times in document: "${oldText.slice(0, 50)}${oldText.length > 50 ? '...' : ''}"\n` +
+      `Provide more surrounding context to make the match unique.`
     );
   }
 

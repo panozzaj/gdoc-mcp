@@ -150,6 +150,42 @@ describe('Google Docs Client', () => {
       const result = await editDoc('test-doc-id', 'Modified by someone', 'My change');
       expect(result.success).toBe(true);
     });
+
+    it('fails when text appears multiple times (requires unique match)', async () => {
+      // Document with repeated text
+      const doc = createMockDoc('The quick brown fox\nThe lazy dog\nThe end', 'rev-1');
+      mockDocsClient.documents.get.mockResolvedValue({ data: doc });
+
+      await readDoc('test-doc-id');
+
+      // Edit "The" should fail because it appears 3 times
+      await expect(
+        editDoc('test-doc-id', 'The', 'A')
+      ).rejects.toThrow('appears 3 times');
+    });
+
+    it('error message suggests adding more context for ambiguous matches', async () => {
+      const doc = createMockDoc('Hello world\nHello there', 'rev-1');
+      mockDocsClient.documents.get.mockResolvedValue({ data: doc });
+
+      await readDoc('test-doc-id');
+
+      await expect(
+        editDoc('test-doc-id', 'Hello', 'Hi')
+      ).rejects.toThrow('Provide more surrounding context');
+    });
+
+    it('succeeds with unique match when more context provided', async () => {
+      const doc = createMockDoc('Hello world\nHello there', 'rev-1');
+      mockDocsClient.documents.get.mockResolvedValue({ data: doc });
+      mockDocsClient.documents.batchUpdate.mockResolvedValue({});
+
+      await readDoc('test-doc-id');
+
+      // "Hello world" is unique, so this should work
+      const result = await editDoc('test-doc-id', 'Hello world', 'Hi world');
+      expect(result.success).toBe(true);
+    });
   });
 
   describe('readDoc', () => {

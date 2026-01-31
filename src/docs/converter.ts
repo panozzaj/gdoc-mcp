@@ -146,10 +146,11 @@ function convertTable(table: Table): string {
 }
 
 // Find text in document and return its range
+// Throws if text appears multiple times (require unique match like Claude Code's Edit tool)
 export function findTextRange(
   doc: Document,
   searchText: string
-): { startIndex: number; endIndex: number } | null {
+): { startIndex: number; endIndex: number; matchCount: number } | null {
   const body = doc.body;
   if (!body?.content) return null;
 
@@ -171,11 +172,21 @@ export function findTextRange(
     }
   }
 
-  const pos = fullText.indexOf(searchText);
+  // Count occurrences
+  let matchCount = 0;
+  let pos = -1;
+  let searchPos = 0;
+  while ((searchPos = fullText.indexOf(searchText, searchPos)) !== -1) {
+    if (matchCount === 0) pos = searchPos;
+    matchCount++;
+    searchPos += 1; // Move past this match to find overlapping matches too
+  }
+
   if (pos === -1) return null;
 
   return {
     startIndex: indexMap[pos],
     endIndex: indexMap[pos + searchText.length - 1] + 1,
+    matchCount,
   };
 }
