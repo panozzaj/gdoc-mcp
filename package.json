@@ -1,0 +1,25 @@
+{
+  "name": "gdoc-mcp",
+  "version": "0.1.0",
+  "description": "Google Docs MCP server with concurrency control",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "fastmcp": "^3.24.0",
+    "google-auth-library": "^9.15.1",
+    "googleapis": "^148.0.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
+}

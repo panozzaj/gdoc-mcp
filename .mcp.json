@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "gdoc": {
+      "command": "node",
+      "args": ["dist/server.js"],
+      "cwd": "/Users/anthony/Documents/dev/tries/2026-01-31-claude-google-drive-connector"
+    }
+  }
+}
