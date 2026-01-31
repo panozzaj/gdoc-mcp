@@ -6,6 +6,11 @@ import {
   NotReadError,
 } from './concurrency.js';
 import { extractDocId } from '../types.js';
+import {
+  parseMarkdown,
+  hasMarkdownFormatting,
+  buildFormattingRequests,
+} from './markdown.js';
 
 export interface DocInfo {
   id: string;
@@ -66,53 +71,75 @@ export async function editDoc(
   const response = await docs.documents.get({ documentId: docId });
   const doc = response.data;
 
-  // 3. Find the text to replace (fails if text no longer exists or is ambiguous)
-  const range = findTextRange(doc, oldText);
+  // 3. Parse markdown from old_text to get raw text for matching
+  const parsedOld = parseMarkdown(oldText);
+  const searchText = parsedOld.rawText;
+
+  // 4. Find the text to replace (fails if text no longer exists or is ambiguous)
+  const range = findTextRange(doc, searchText);
   if (!range) {
+    const displayText = hasMarkdownFormatting(oldText) ? `${oldText} (raw: "${searchText}")` : oldText;
     throw new Error(
-      `Text not found in document: "${oldText.slice(0, 100)}${oldText.length > 100 ? '...' : ''}"\n` +
+      `Text not found in document: "${displayText.slice(0, 100)}${displayText.length > 100 ? '...' : ''}"\n` +
       `The document may have been modified. Try reading it again.`
     );
   }
 
   if (range.matchCount > 1) {
     throw new Error(
-      `Text appears ${range.matchCount} times in document: "${oldText.slice(0, 50)}${oldText.length > 50 ? '...' : ''}"\n` +
+      `Text appears ${range.matchCount} times in document: "${searchText.slice(0, 50)}${searchText.length > 50 ? '...' : ''}"\n` +
       `Provide more surrounding context to make the match unique.`
     );
   }
 
-  // 4. Apply the edit (delete then insert)
+  // 5. Parse markdown from new_text to get raw text and formatting
+  const parsedNew = parseMarkdown(newText);
+
+  // 6. Build requests: delete old, insert new text, then apply formatting
+  const requests: object[] = [
+    {
+      deleteContentRange: {
+        range: {
+          startIndex: range.startIndex,
+          endIndex: range.endIndex,
+        },
+      },
+    },
+    {
+      insertText: {
+        location: { index: range.startIndex },
+        text: parsedNew.rawText,
+      },
+    },
+  ];
+
+  // 7. Add formatting requests for each segment
+  let currentIndex = range.startIndex;
+  for (const segment of parsedNew.segments) {
+    const segmentEnd = currentIndex + segment.text.length;
+    const formatRequests = buildFormattingRequests(
+      currentIndex,
+      segmentEnd,
+      segment.formatting
+    );
+    requests.push(...formatRequests);
+    currentIndex = segmentEnd;
+  }
+
+  // 8. Apply all changes in one batch
   await docs.documents.batchUpdate({
     documentId: docId,
-    requestBody: {
-      requests: [
-        {
-          deleteContentRange: {
-            range: {
-              startIndex: range.startIndex,
-              endIndex: range.endIndex,
-            },
-          },
-        },
-        {
-          insertText: {
-            location: { index: range.startIndex },
-            text: newText,
-          },
-        },
-      ],
-    },
+    requestBody: { requests },
   });
 
-  // 5. Update the cached revision
+  // 9. Update the cached revision
   const updated = await docs.documents.get({ documentId: docId });
   const newRevision = updated.data.revisionId || '';
   setCachedRevision(docId, newRevision);
 
   return {
     success: true,
-    message: `Replaced "${oldText.slice(0, 50)}..." with "${newText.slice(0, 50)}..."`,
+    message: `Replaced "${oldText.slice(0, 50)}${oldText.length > 50 ? '...' : ''}" with "${newText.slice(0, 50)}${newText.length > 50 ? '...' : ''}"`,
   };
 }
 

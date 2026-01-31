@@ -12,9 +12,10 @@ const server = new FastMCP({
 server.addTool({
   name: 'gdoc_read',
   description:
-    'Read a Google Doc and return its content as markdown. ' +
-    'Also caches the revision ID for concurrency control. ' +
-    'Must be called before gdoc_edit.',
+    'Read a Google Doc and return its content as markdown. Must be called before gdoc_edit. ' +
+    'Formatting support: **bold**, *italic*, ~~strikethrough~~, [links](url), headings (#), lists (- or 1.), tables. ' +
+    'Images shown as <!-- gdoc:image id="..." --> comments (not editable). ' +
+    'Note: Some complex formatting (colors, fonts, nested styles) may not be fully represented.',
   parameters: z.object({
     docId: z.string().describe('Google Doc ID or full URL'),
     format: z
@@ -40,12 +41,24 @@ server.addTool({
 server.addTool({
   name: 'gdoc_edit',
   description:
-    'Replace text in a Google Doc. Requires gdoc_read to be called first. ' +
-    'Fails if the document was modified since the last read (concurrency protection).',
+    'Replace text in a Google Doc using markdown. Requires gdoc_read first. ' +
+    'Use markdown in both old_text and new_text: **bold**, *italic*, ~~strike~~, [link](url). ' +
+    'old_text is matched by raw text (e.g., "[Click](url)" matches "Click" in doc). ' +
+    'new_text formatting is applied to the replacement. ' +
+    'Fails if old_text matches multiple locations (provide more context to disambiguate). ' +
+    'NOT SUPPORTED: tables, headings, images, colors, fonts.',
   parameters: z.object({
     docId: z.string().describe('Google Doc ID or full URL'),
-    old_text: z.string().describe('Exact text to find and replace'),
-    new_text: z.string().describe('Replacement text'),
+    old_text: z
+      .string()
+      .describe(
+        'Text to find (markdown supported). Matched by raw text content. Must be unique in document.'
+      ),
+    new_text: z
+      .string()
+      .describe(
+        'Replacement text (markdown supported). Formatting like **bold**, *italic*, [links](url) will be applied.'
+      ),
   }),
   execute: async ({ docId, old_text, new_text }) => {
     try {
