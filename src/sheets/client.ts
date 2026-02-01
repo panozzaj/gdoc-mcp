@@ -1,4 +1,14 @@
 import { getSheetsClient } from '../auth.js';
+import {
+  cacheFormulas,
+  cacheDimensions,
+  getCachedRange,
+  hasReadRange,
+  invalidateRange,
+  parseRange,
+  NotReadError,
+  ConcurrentModificationError,
+} from './concurrency.js';
 
 // Extract spreadsheet ID from URL or return as-is if already an ID
 function extractSpreadsheetId(idOrUrl: string): string {
@@ -79,13 +89,39 @@ export async function readSheet(
   const sheetTitle = targetSheet.properties?.title || 'Sheet1';
   const readRange = range ? `${sheetTitle}!${range}` : sheetTitle;
 
-  // Read the data
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: readRange,
-  });
+  // Read both values and formulas
+  const [valuesResponse, formulasResponse] = await Promise.all([
+    sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: readRange,
+      valueRenderOption: 'FORMATTED_VALUE',
+    }),
+    sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: readRange,
+      valueRenderOption: 'FORMULA',
+    }),
+  ]);
 
-  const rows = response.data.values || [];
+  const rows = valuesResponse.data.values || [];
+  const formulas = formulasResponse.data.values || [];
+
+  // Cache formulas for concurrency control
+  // Determine start position from range
+  const parsed = parseRange(readRange);
+  const startCol = parsed?.startCol || 1;
+  const startRow = parsed?.startRow || 1;
+  cacheFormulas(spreadsheetId, sheetTitle, startCol, startRow, formulas);
+
+  // Cache sheet dimensions
+  cacheDimensions(
+    spreadsheetId,
+    sheetsList.map(s => ({
+      title: s.properties?.title || 'Sheet',
+      rows: s.properties?.gridProperties?.rowCount || 0,
+      cols: s.properties?.gridProperties?.columnCount || 0,
+    }))
+  );
 
   // Convert to markdown table
   let content: string;
@@ -134,14 +170,79 @@ export async function editSheet(
   // Build full range with sheet name if provided
   const fullRange = sheetName ? `${sheetName}!${range}` : range;
 
+  // Determine default sheet name if not provided
+  let defaultSheetName = sheetName;
+  if (!defaultSheetName && !range.includes('!')) {
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: 'sheets.properties.title',
+    });
+    defaultSheetName = meta.data.sheets?.[0]?.properties?.title || 'Sheet1';
+  }
+
+  // Check if cells were read first
+  if (!hasReadRange(spreadsheetId, fullRange, defaultSheetName)) {
+    throw new NotReadError(spreadsheetId, fullRange);
+  }
+
+  // Get cached formulas for comparison
+  const cachedFormulas = getCachedRange(spreadsheetId, fullRange, defaultSheetName);
+  if (!cachedFormulas) {
+    throw new NotReadError(spreadsheetId, fullRange);
+  }
+
+  // Fetch current formulas to check for concurrent modifications
+  const currentFormulasResponse = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: fullRange,
+    valueRenderOption: 'FORMULA',
+  });
+  const currentFormulas = currentFormulasResponse.data.values || [];
+
+  // Compare formulas
+  const changedCells: string[] = [];
+  const parsed = parseRange(fullRange);
+  if (parsed) {
+    const resolvedSheet = parsed.sheetName || defaultSheetName || 'Sheet1';
+    for (let rowIdx = 0; rowIdx < currentFormulas.length; rowIdx++) {
+      const row = currentFormulas[rowIdx] || [];
+      for (let colIdx = 0; colIdx < row.length; colIdx++) {
+        const col = parsed.startCol + colIdx;
+        const rowNum = parsed.startRow + rowIdx;
+        const ref = `${resolvedSheet}!${columnToLetter(col)}${rowNum}`;
+
+        const currentVal = row[colIdx];
+        const currentFormula = currentVal?.startsWith?.('=') ? currentVal : null;
+        const cachedFormula = cachedFormulas.get(ref);
+
+        if (currentFormula !== cachedFormula) {
+          changedCells.push(ref);
+        }
+      }
+    }
+  }
+
+  if (changedCells.length > 0) {
+    invalidateRange(spreadsheetId, fullRange, defaultSheetName);
+    throw new ConcurrentModificationError(changedCells);
+  }
+
+  // All checks passed, perform the update
   const response = await sheets.spreadsheets.values.update({
     spreadsheetId,
     range: fullRange,
-    valueInputOption: 'USER_ENTERED', // Allows formulas and auto-formatting
+    valueInputOption: 'USER_ENTERED',
     requestBody: {
       values,
     },
   });
+
+  // Update cache with new formulas
+  const newFormulas = values.map(row => row.map(cell => cell?.startsWith?.('=') ? cell : null));
+  if (parsed) {
+    const resolvedSheet = parsed.sheetName || defaultSheetName || 'Sheet1';
+    cacheFormulas(spreadsheetId, resolvedSheet, parsed.startCol, parsed.startRow, values);
+  }
 
   const updatedCells = response.data.updatedCells || 0;
   return {
@@ -149,6 +250,17 @@ export async function editSheet(
     message: `Updated ${updatedCells} cell${updatedCells !== 1 ? 's' : ''} in ${fullRange}`,
     updatedCells,
   };
+}
+
+// Helper to convert column number to letter
+function columnToLetter(col: number): string {
+  let result = '';
+  while (col > 0) {
+    col--;
+    result = String.fromCharCode((col % 26) + 65) + result;
+    col = Math.floor(col / 26);
+  }
+  return result;
 }
 
 export async function appendSheet(

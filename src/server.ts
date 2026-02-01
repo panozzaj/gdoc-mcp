@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { readDoc, editDoc, getDocInfo, listDocs, searchDoc } from './docs/client.js';
 import { NotReadError } from './docs/concurrency.js';
 import { readSheet, editSheet, appendSheet, getSheetInfo } from './sheets/client.js';
+import {
+  NotReadError as SheetNotReadError,
+  ConcurrentModificationError,
+} from './sheets/concurrency.js';
 
 const server = new FastMCP({
   name: 'gdoc-mcp',
@@ -227,10 +231,20 @@ server.addTool({
     sheet: z.string().optional().describe('Sheet name (if not included in range)'),
   }),
   execute: async ({ spreadsheetId, range, values, sheet }) => {
-    const result = await editSheet(spreadsheetId, range, values, sheet);
-    return {
-      content: [{ type: 'text' as const, text: result.message }],
-    };
+    try {
+      const result = await editSheet(spreadsheetId, range, values, sheet);
+      return {
+        content: [{ type: 'text' as const, text: result.message }],
+      };
+    } catch (error) {
+      if (error instanceof SheetNotReadError || error instanceof ConcurrentModificationError) {
+        return {
+          content: [{ type: 'text' as const, text: (error as Error).message }],
+          isError: true,
+        };
+      }
+      throw error;
+    }
   },
 });
 
