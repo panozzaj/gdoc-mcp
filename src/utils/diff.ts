@@ -1,7 +1,25 @@
 /**
  * Simple diff utility for showing changes in a readable format.
  * Uses word-level diff for short text, line-level for longer text.
+ * Outputs ANSI-colored diff that renders in Claude Code.
  */
+
+// ANSI escape codes for colored diff output
+const ANSI = {
+  reset: '\x1b[0m',
+  dim: '\x1b[2m',
+  // Removed line colors (red)
+  removedFg: '\x1b[38;5;167m',
+  removedBg: '\x1b[48;5;52m',
+  // Added line colors (green)
+  addedFg: '\x1b[38;5;77m',
+  addedBg: '\x1b[48;5;22m',
+  // Text color
+  white: '\x1b[38;5;231m',
+  // Reset colors
+  resetFg: '\x1b[39m',
+  resetBg: '\x1b[49m',
+};
 
 interface DiffResult {
   /** Formatted diff string for display */
@@ -39,7 +57,7 @@ export function generateDiff(oldText: string, newText: string): DiffResult {
 }
 
 /**
- * Format a single-line change with word-level highlighting.
+ * Format a single-line change with word-level ANSI highlighting.
  */
 function formatInlineDiff(oldText: string, newText: string): string {
   const oldWords = oldText.split(/(\s+)/);
@@ -72,19 +90,43 @@ function formatInlineDiff(oldText: string, newText: string): string {
   const newMiddle = newWords.slice(prefixEnd, newSuffixStart).join('');
   const suffix = oldWords.slice(oldSuffixStart).join('');
 
-  // Build inline diff
+  // Build inline diff with ANSI colors
   let result = '';
   if (prefix) result += prefix;
-  if (oldMiddle) result += `~~${oldMiddle.trim()}~~`;
+  if (oldMiddle) {
+    result += `${ANSI.removedFg}${ANSI.removedBg}${oldMiddle.trim()}${ANSI.resetFg}${ANSI.resetBg}`;
+  }
   if (oldMiddle && newMiddle) result += ' → ';
-  if (newMiddle) result += `**${newMiddle.trim()}**`;
+  if (newMiddle) {
+    result += `${ANSI.addedFg}${ANSI.addedBg}${newMiddle.trim()}${ANSI.resetFg}${ANSI.resetBg}`;
+  }
   if (suffix) result += suffix;
 
-  return result || `~~${oldText}~~ → **${newText}**`;
+  if (!result) {
+    result = `${ANSI.removedFg}${ANSI.removedBg}${oldText}${ANSI.resetFg}${ANSI.resetBg}`;
+    result += ' → ';
+    result += `${ANSI.addedFg}${ANSI.addedBg}${newText}${ANSI.resetFg}${ANSI.resetBg}`;
+  }
+
+  return result;
 }
 
 /**
- * Format multi-line changes as plain text diff (no code fence).
+ * Format a removed line with ANSI colors.
+ */
+function formatRemovedLine(line: string): string {
+  return `${ANSI.removedFg}${ANSI.removedBg}- ${ANSI.white}${line}${ANSI.resetFg}${ANSI.resetBg}`;
+}
+
+/**
+ * Format an added line with ANSI colors.
+ */
+function formatAddedLine(line: string): string {
+  return `${ANSI.addedFg}${ANSI.addedBg}+ ${ANSI.white}${line}${ANSI.resetFg}${ANSI.resetBg}`;
+}
+
+/**
+ * Format multi-line changes with ANSI colors.
  * Only shows changed lines, no context.
  */
 function formatLineDiff(oldLines: string[], newLines: string[]): string {
@@ -98,12 +140,12 @@ function formatLineDiff(oldLines: string[], newLines: string[]): string {
   for (const common of lcs) {
     // Output removed lines
     while (oldIdx < common.oldIndex) {
-      result.push(`- ${oldLines[oldIdx]}`);
+      result.push(formatRemovedLine(oldLines[oldIdx]));
       oldIdx++;
     }
     // Output added lines
     while (newIdx < common.newIndex) {
-      result.push(`+ ${newLines[newIdx]}`);
+      result.push(formatAddedLine(newLines[newIdx]));
       newIdx++;
     }
     // Skip common lines (no context)
@@ -113,12 +155,12 @@ function formatLineDiff(oldLines: string[], newLines: string[]): string {
 
   // Output remaining removed lines
   while (oldIdx < oldLines.length) {
-    result.push(`- ${oldLines[oldIdx]}`);
+    result.push(formatRemovedLine(oldLines[oldIdx]));
     oldIdx++;
   }
   // Output remaining added lines
   while (newIdx < newLines.length) {
-    result.push(`+ ${newLines[newIdx]}`);
+    result.push(formatAddedLine(newLines[newIdx]));
     newIdx++;
   }
 
