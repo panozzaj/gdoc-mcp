@@ -1,6 +1,6 @@
 import { FastMCP } from 'fastmcp';
 import { z } from 'zod';
-import { readDoc, editDoc, getDocInfo, listDocs } from './docs/client.js';
+import { readDoc, editDoc, getDocInfo, listDocs, searchDoc } from './docs/client.js';
 import { NotReadError } from './docs/concurrency.js';
 
 const server = new FastMCP({
@@ -15,6 +15,7 @@ server.addTool({
     'Read a Google Doc and return its content as markdown. Must be called before gdoc_edit. ' +
     'Formatting support: **bold**, *italic*, ~~strikethrough~~, [links](url), headings (#), lists (- or 1.), tables. ' +
     'Images shown as <!-- gdoc:image id="..." --> comments (not editable). ' +
+    'Use offset/limit for long docs. ' +
     'Note: Some complex formatting (colors, fonts, nested styles) may not be fully represented.',
   parameters: z.object({
     docId: z.string().describe('Google Doc ID or full URL'),
@@ -23,14 +24,70 @@ server.addTool({
       .optional()
       .default('markdown')
       .describe('Output format (default: markdown)'),
+    offset: z
+      .number()
+      .optional()
+      .describe('Line number to start from (1-indexed). Omit to start from beginning.'),
+    limit: z
+      .number()
+      .optional()
+      .describe('Maximum number of lines to return. Omit for all lines.'),
   }),
-  execute: async ({ docId, format }) => {
+  execute: async ({ docId, format, offset, limit }) => {
     const result = await readDoc(docId, format);
+    let content = result.content;
+    let header = `# ${result.title}`;
+
+    // Apply offset/limit if specified
+    if (offset !== undefined || limit !== undefined) {
+      const lines = content.split('\n');
+      const totalLines = lines.length;
+      const startLine = offset ? Math.max(0, offset - 1) : 0;
+      const endLine = limit ? startLine + limit : totalLines;
+      const slicedLines = lines.slice(startLine, endLine);
+      content = slicedLines.join('\n');
+      header += ` (lines ${startLine + 1}-${Math.min(endLine, totalLines)} of ${totalLines})`;
+    }
+
     return {
       content: [
         {
           type: 'text' as const,
-          text: `# ${result.title}\n\n${result.content}`,
+          text: `${header}\n\n${content}`,
+        },
+      ],
+    };
+  },
+});
+
+// Tool: Search within a Google Doc
+server.addTool({
+  name: 'gdoc_search',
+  description:
+    'Search for text in a Google Doc and return matching lines with context. ' +
+    'Useful for finding specific content in long documents without reading the entire doc. ' +
+    'Returns matching lines with surrounding context (like grep -C).',
+  parameters: z.object({
+    docId: z.string().describe('Google Doc ID or full URL'),
+    query: z.string().describe('Text or regex pattern to search for'),
+    context: z
+      .number()
+      .optional()
+      .default(2)
+      .describe('Number of lines of context before and after each match (default: 2)'),
+    maxMatches: z
+      .number()
+      .optional()
+      .default(10)
+      .describe('Maximum number of matches to return (default: 10)'),
+  }),
+  execute: async ({ docId, query, context, maxMatches }) => {
+    const result = await searchDoc(docId, query, context, maxMatches);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: result,
         },
       ],
     };

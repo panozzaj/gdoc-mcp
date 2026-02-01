@@ -56,6 +56,75 @@ export async function readDoc(
   };
 }
 
+export async function searchDoc(
+  docIdOrUrl: string,
+  query: string,
+  context: number = 2,
+  maxMatches: number = 10
+): Promise<string> {
+  const docId = extractDocId(docIdOrUrl);
+  const docs = await getDocsClient();
+
+  const response = await docs.documents.get({ documentId: docId });
+  const doc = response.data;
+
+  // Cache revision so edits work after search
+  const revisionId = doc.revisionId || '';
+  setCachedRevision(docId, revisionId);
+
+  const content = convertToMarkdown(doc);
+  const lines = content.split('\n');
+
+  // Try as regex first, fall back to literal string
+  let regex: RegExp;
+  try {
+    regex = new RegExp(query, 'gi');
+  } catch {
+    regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  }
+
+  const matches: { lineNum: number; line: string }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (regex.test(lines[i])) {
+      matches.push({ lineNum: i + 1, line: lines[i] });
+      regex.lastIndex = 0; // Reset regex state
+    }
+    if (matches.length >= maxMatches) break;
+  }
+
+  if (matches.length === 0) {
+    return `No matches found for "${query}" in "${doc.title || 'Untitled'}"`;
+  }
+
+  // Build output with context
+  const output: string[] = [`# ${doc.title || 'Untitled'} - Search results for "${query}"`];
+  output.push(`Found ${matches.length} match${matches.length > 1 ? 'es' : ''}:\n`);
+
+  const shownLines = new Set<number>();
+
+  for (const match of matches) {
+    const startLine = Math.max(0, match.lineNum - 1 - context);
+    const endLine = Math.min(lines.length, match.lineNum + context);
+
+    // Add separator if there's a gap from previous shown lines
+    const minShown = Math.min(...Array.from(shownLines));
+    if (shownLines.size > 0 && startLine > Math.max(...Array.from(shownLines)) + 1) {
+      output.push('---');
+    }
+
+    for (let i = startLine; i < endLine; i++) {
+      if (!shownLines.has(i)) {
+        const lineNum = i + 1;
+        const prefix = lineNum === match.lineNum ? '>' : ' ';
+        output.push(`${prefix} ${lineNum}: ${lines[i]}`);
+        shownLines.add(i);
+      }
+    }
+  }
+
+  return output.join('\n');
+}
+
 export async function editDoc(
   docIdOrUrl: string,
   oldText: string,
