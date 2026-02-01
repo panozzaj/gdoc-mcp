@@ -57,7 +57,8 @@ export function generateDiff(oldText: string, newText: string): DiffResult {
 }
 
 /**
- * Format a single-line change with word-level ANSI highlighting.
+ * Format a single-line change showing both old and new with word-level highlighting.
+ * Shows the full line with changed words highlighted.
  */
 function formatInlineDiff(oldText: string, newText: string): string {
   const oldWords = oldText.split(/(\s+)/);
@@ -90,25 +91,28 @@ function formatInlineDiff(oldText: string, newText: string): string {
   const newMiddle = newWords.slice(prefixEnd, newSuffixStart).join('');
   const suffix = oldWords.slice(oldSuffixStart).join('');
 
-  // Build inline diff with ANSI colors
-  let result = '';
-  if (prefix) result += prefix;
-  if (oldMiddle) {
-    result += `${ANSI.removedFg}${ANSI.removedBg}${oldMiddle.trim()}${ANSI.resetFg}${ANSI.resetBg}`;
+  // Build two-line diff: - old / + new with word-level highlighting
+  const lines: string[] = [];
+
+  // Old line with removed words highlighted
+  if (oldMiddle || !newMiddle) {
+    let oldLine = prefix;
+    if (oldMiddle) {
+      oldLine += `${ANSI.removedFg}${ANSI.removedBg}${oldMiddle}${ANSI.resetFg}${ANSI.resetBg}`;
+    }
+    oldLine += suffix;
+    lines.push(formatRemovedLine(oldLine));
   }
-  if (oldMiddle && newMiddle) result += ' → ';
+
+  // New line with added words highlighted
+  let newLine = prefix;
   if (newMiddle) {
-    result += `${ANSI.addedFg}${ANSI.addedBg}${newMiddle.trim()}${ANSI.resetFg}${ANSI.resetBg}`;
+    newLine += `${ANSI.addedFg}${ANSI.addedBg}${newMiddle}${ANSI.resetFg}${ANSI.resetBg}`;
   }
-  if (suffix) result += suffix;
+  newLine += suffix;
+  lines.push(formatAddedLine(newLine));
 
-  if (!result) {
-    result = `${ANSI.removedFg}${ANSI.removedBg}${oldText}${ANSI.resetFg}${ANSI.resetBg}`;
-    result += ' → ';
-    result += `${ANSI.addedFg}${ANSI.addedBg}${newText}${ANSI.resetFg}${ANSI.resetBg}`;
-  }
-
-  return result;
+  return lines.join('\n');
 }
 
 /**
