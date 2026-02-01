@@ -14,6 +14,7 @@ import {
   parseMarkdownTable,
   buildInsertTableRequest,
 } from './markdown.js';
+import { generateDiff } from '../utils/diff.js';
 
 export interface DocInfo {
   id: string;
@@ -227,10 +228,8 @@ export async function editDoc(
     const finalDoc = await docs.documents.get({ documentId: docId });
     setCachedRevision(docId, finalDoc.data.revisionId || '');
 
-    return {
-      success: true,
-      message: `Replaced table with ${numRows}x${numColumns} table`,
-    };
+    const diff = generateDiff(oldText, newText);
+    return { success: true, message: diff.formatted };
   }
 
   // 4. Parse markdown from old_text to get raw text for matching
@@ -326,10 +325,8 @@ export async function editDoc(
       const finalDoc = await docs.documents.get({ documentId: docId });
       setCachedRevision(docId, finalDoc.data.revisionId || '');
 
-      return {
-        success: true,
-        message: `Inserted ${numRows}x${numColumns} table`,
-      };
+      const diff = generateDiff(oldText, newText);
+      return { success: true, message: diff.formatted };
     }
   }
 
@@ -378,10 +375,8 @@ export async function editDoc(
   const newRevision = updated.data.revisionId || '';
   setCachedRevision(docId, newRevision);
 
-  return {
-    success: true,
-    message: `Replaced "${oldText.slice(0, 50)}${oldText.length > 50 ? '...' : ''}" with "${newText.slice(0, 50)}${newText.length > 50 ? '...' : ''}"`,
-  };
+  const diff = generateDiff(oldText, newText);
+  return { success: true, message: diff.formatted };
 }
 
 export async function getDocInfo(docIdOrUrl: string): Promise<DocInfo> {
