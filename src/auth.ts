@@ -1,11 +1,12 @@
 import { OAuth2Client } from 'google-auth-library';
-import { google, docs_v1, drive_v3 } from 'googleapis';
+import { google, docs_v1, drive_v3, sheets_v4 } from 'googleapis';
 import { execSync } from 'child_process';
 
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
 let docsClient: docs_v1.Docs | null = null;
 let driveClient: drive_v3.Drive | null = null;
+let sheetsClient: sheets_v4.Sheets | null = null;
 
 function getAccessToken(): string {
   // Cache token for 5 minutes to avoid repeated gcloud calls
@@ -46,4 +47,10 @@ export async function getDriveClient(): Promise<drive_v3.Drive> {
   const auth = getAuthClient();
   driveClient = google.drive({ version: 'v3', auth });
   return driveClient;
+}
+
+export async function getSheetsClient(): Promise<sheets_v4.Sheets> {
+  const auth = getAuthClient();
+  sheetsClient = google.sheets({ version: 'v4', auth });
+  return sheetsClient;
 }

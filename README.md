@@ -2,6 +2,33 @@
 
 An MCP server that lets Claude read and edit Google Docs using markdown.
 
+## Installation
+
+```bash
+git clone https://github.com/panozzaj/gdoc-mcp.git
+cd gdoc-mcp
+npm install
+npm run build
+```
+
+## Configuration
+
+Add to your Claude config file:
+
+**Claude Code:** `~/.claude/settings.json`
+**Claude Desktop:** `~/.claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "gdoc": {
+      "command": "node",
+      "args": ["/path/to/gdoc-mcp/dist/server.js"]
+    }
+  }
+}
+```
+
 ## Authentication
 
 This server uses `gcloud` CLI for authentication. No OAuth client credentials needed.
@@ -15,19 +42,14 @@ This server uses `gcloud` CLI for authentication. No OAuth client credentials ne
    gcloud auth login --enable-gdrive-access
    ```
 
-3. The `--enable-gdrive-access` flag is required because:
-   - By default, `gcloud auth login` only grants access to GCP services
-   - Google Docs/Drive are not GCP services, they're consumer Google APIs
-   - This flag adds the Drive scope to your credentials
+The `--enable-gdrive-access` flag is required because Google Docs/Drive are consumer APIs, not GCP services.
 
 ### Token expiry
 
-Tokens from `gcloud auth login` typically last 1 hour. If you see auth errors:
+Tokens typically last 1 hour. If you see auth errors, re-run:
 ```bash
 gcloud auth login --enable-gdrive-access
 ```
-
-The server caches tokens for 5 minutes to avoid repeated `gcloud` calls.
 
 ### Troubleshooting
 
@@ -39,35 +61,39 @@ The server caches tokens for 5 minutes to avoid repeated `gcloud` calls.
 - Run `gcloud auth login --enable-gdrive-access` again
 
 **Token works for some docs but not others**
-- Check doc sharing permissions - the Google account you logged in with needs access
+- Check doc sharing permissions - your Google account needs access
 
-## Usage
+## Tools
 
-### Tools
+| Tool | Description |
+|------|-------------|
+| `gdoc_read` | Read a doc as markdown. Supports `offset`/`limit` for long docs. |
+| `gdoc_search` | Search for text, returns matches with context (like grep). |
+| `gdoc_edit` | Replace text (requires reading first). Supports markdown formatting. |
+| `gdoc_list` | List recent docs, optionally filter by name. |
+| `gdoc_info` | Get doc metadata (title, revision ID). |
 
-- `gdoc_read` - Read a Google Doc as markdown
-- `gdoc_edit` - Replace text in a doc (requires reading first)
-- `gdoc_list` - List recent docs
-- `gdoc_info` - Get doc metadata
-
-### Markdown support
+## Markdown Support
 
 **Reading:**
-- Bold, italic, strikethrough, links convert to markdown
-- Headings convert to `#`, `##`, etc.
-- Tables convert to markdown tables
-- Images shown as `<!-- gdoc:image id="..." -->` comments
+- Bold, italic, strikethrough, links → markdown
+- Headings → `#`, `##`, etc.
+- Tables → markdown tables
+- Images → `<!-- gdoc:image id="..." -->` comments
 
 **Editing:**
-- `**bold**`, `*italic*`, `~~strikethrough~~`, `[links](url)` supported
+- `**bold**`, `*italic*`, `~~strikethrough~~`, `[links](url)`
 - Tables: provide full markdown table to replace existing table
-- Images cannot be edited
+- Headings, lists, images: not yet supported for editing
 
-### Example
+## Examples
 
 ```
-# Read a doc
-gdoc_read(docId: "1ABC...")
+# Read first 20 lines of a doc
+gdoc_read(docId: "1ABC...", limit: 20)
+
+# Search for text
+gdoc_search(docId: "1ABC...", query: "TODO", context: 3)
 
 # Edit text with formatting
 gdoc_edit(docId: "1ABC...", old_text: "hello", new_text: "**hello**")
@@ -77,3 +103,9 @@ gdoc_edit(docId: "1ABC...",
   old_text: "| A | B |\n| --- | --- |\n| 1 | 2 |",
   new_text: "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |")
 ```
+
+## Concurrency
+
+Edits require reading the doc first. The server verifies that `old_text` still exists before applying changes - if someone else modified that text, you'll get an error asking you to re-read.
+
+This is lenient concurrency control (like Claude Code's file editing) rather than strict locking.

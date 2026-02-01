@@ -2,6 +2,7 @@ import { FastMCP } from 'fastmcp';
 import { z } from 'zod';
 import { readDoc, editDoc, getDocInfo, listDocs, searchDoc } from './docs/client.js';
 import { NotReadError } from './docs/concurrency.js';
+import { readSheet, editSheet, appendSheet, getSheetInfo } from './sheets/client.js';
 
 const server = new FastMCP({
   name: 'gdoc-mcp',
@@ -177,6 +178,100 @@ server.addTool({
         {
           type: 'text' as const,
           text: `Title: ${info.title}\nID: ${info.id}\nRevision: ${info.revisionId}`,
+        },
+      ],
+    };
+  },
+});
+
+// ============ Google Sheets Tools ============
+
+// Tool: Read a Google Sheet
+server.addTool({
+  name: 'gsheet_read',
+  description:
+    'Read a Google Sheet and return its content as a markdown table. ' +
+    'Returns the first sheet by default, or specify a sheet name. ' +
+    'Use range parameter to read a specific area (e.g., "A1:D10").',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+    sheet: z.string().optional().describe('Sheet name (default: first sheet)'),
+    range: z.string().optional().describe('Cell range to read (e.g., "A1:D10"). Omit for entire sheet.'),
+  }),
+  execute: async ({ spreadsheetId, sheet, range }) => {
+    const result = await readSheet(spreadsheetId, sheet, range);
+    const header = `# ${result.title} - ${result.sheetTitle} (${result.rowCount} rows, ${result.columnCount} cols)`;
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `${header}\n\n${result.content}`,
+        },
+      ],
+    };
+  },
+});
+
+// Tool: Edit cells in a Google Sheet
+server.addTool({
+  name: 'gsheet_edit',
+  description:
+    'Update cells in a Google Sheet. Specify the range and new values. ' +
+    'Values are entered as USER_ENTERED, so formulas (=SUM(A1:A10)) work.',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+    range: z.string().describe('Cell range to update (e.g., "A1:B2", "A1", "Sheet2!A1:C3")'),
+    values: z
+      .array(z.array(z.string()))
+      .describe('2D array of values, e.g., [["a", "b"], ["c", "d"]] for a 2x2 range'),
+    sheet: z.string().optional().describe('Sheet name (if not included in range)'),
+  }),
+  execute: async ({ spreadsheetId, range, values, sheet }) => {
+    const result = await editSheet(spreadsheetId, range, values, sheet);
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+    };
+  },
+});
+
+// Tool: Append rows to a Google Sheet
+server.addTool({
+  name: 'gsheet_append',
+  description:
+    'Append rows to the end of a Google Sheet. ' +
+    'Finds the last row with data and adds new rows below it.',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+    values: z
+      .array(z.array(z.string()))
+      .describe('2D array of rows to append, e.g., [["row1col1", "row1col2"], ["row2col1", "row2col2"]]'),
+    sheet: z.string().optional().describe('Sheet name (default: first sheet)'),
+  }),
+  execute: async ({ spreadsheetId, values, sheet }) => {
+    const result = await appendSheet(spreadsheetId, values, sheet);
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+    };
+  },
+});
+
+// Tool: Get Sheet Info
+server.addTool({
+  name: 'gsheet_info',
+  description: 'Get metadata about a Google Spreadsheet (title, list of sheets with dimensions).',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+  }),
+  execute: async ({ spreadsheetId }) => {
+    const info = await getSheetInfo(spreadsheetId);
+    const sheetsInfo = info.sheets
+      .map(s => `  - ${s.title} (${s.rowCount} rows, ${s.columnCount} cols)`)
+      .join('\n');
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Title: ${info.title}\nID: ${info.id}\nSheets:\n${sheetsInfo}`,
         },
       ],
     };
