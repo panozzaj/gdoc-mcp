@@ -1,22 +1,46 @@
-# Google Docs MCP Server
+# gdoc-mcp
 
-An MCP server that lets Claude read and edit Google Docs using markdown.
+An MCP server that lets Claude read and edit Google Docs and Sheets using markdown syntax.
+
+## Features
+
+**Google Docs**
+- Read documents as markdown (bold, italic, strikethrough, links, headings, lists, tables)
+- Edit text with markdown formatting (`**bold**`, `*italic*`, `[link](url)`)
+- Search with regex patterns and context
+- List recent documents
+
+**Google Sheets**
+- Read sheets as markdown tables
+- Edit cells (formulas supported)
+- Append rows
+- Get sheet metadata
+
+**Concurrency Safety**
+- Requires read-before-edit (ensures you've seen the content)
+- Text-based verification (confirms target text exists before replacing)
+- Formula-aware sheet editing (detects concurrent formula changes)
+- Colored diff output shows exactly what changed
 
 ## Installation
 
 ```bash
-git clone https://github.com/panozzaj/gdoc-mcp.git
-cd gdoc-mcp
-npm install
-npm run build
+npm install && npm run build
 ```
+
+## Authentication
+
+Uses `gcloud` CLI for authentication (no OAuth setup required):
+
+```bash
+gcloud auth login --enable-gdrive-access
+```
+
+The `--enable-gdrive-access` flag is required to access Google Drive APIs with consumer accounts.
 
 ## Configuration
 
-Add to your Claude config file:
-
-**Claude Code:** `~/.claude/settings.json`
-**Claude Desktop:** `~/.claude/claude_desktop_config.json`
+Add to your Claude MCP config:
 
 ```json
 {
@@ -29,83 +53,56 @@ Add to your Claude config file:
 }
 ```
 
-## Authentication
-
-This server uses `gcloud` CLI for authentication. No OAuth client credentials needed.
-
-### Setup
-
-1. Install gcloud CLI: https://cloud.google.com/sdk/docs/install
-
-2. Authenticate with Google Drive access:
-   ```bash
-   gcloud auth login --enable-gdrive-access
-   ```
-
-The `--enable-gdrive-access` flag is required because Google Docs/Drive are consumer APIs, not GCP services.
-
-### Token expiry
-
-Tokens typically last 1 hour. If you see auth errors, re-run:
-```bash
-gcloud auth login --enable-gdrive-access
-```
-
-### Troubleshooting
-
-**"Failed to get access token"**
-- Run `gcloud auth login --enable-gdrive-access`
-
-**"Request had insufficient authentication scopes"**
-- You logged in without `--enable-gdrive-access`
-- Run `gcloud auth login --enable-gdrive-access` again
-
-**Token works for some docs but not others**
-- Check doc sharing permissions - your Google account needs access
-
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `gdoc_read` | Read a doc as markdown. Supports `offset`/`limit` for long docs. |
-| `gdoc_search` | Search for text, returns matches with context (like grep). |
-| `gdoc_edit` | Replace text (requires reading first). Supports markdown formatting. |
-| `gdoc_list` | List recent docs, optionally filter by name. |
-| `gdoc_info` | Get doc metadata (title, revision ID). |
+| `gdoc_read` | Read a Google Doc as markdown |
+| `gdoc_edit` | Replace text using markdown (requires read first) |
+| `gdoc_search` | Search doc content with regex |
+| `gdoc_list` | List recent Google Docs |
+| `gdoc_info` | Get document metadata |
+| `gsheet_read` | Read a Google Sheet as markdown table |
+| `gsheet_edit` | Update cells in a sheet |
+| `gsheet_append` | Append rows to a sheet |
+| `gsheet_info` | Get spreadsheet metadata |
 
-## Markdown Support
+## Comparison with Other MCP Servers
 
-**Reading:**
-- Bold, italic, strikethrough, links → markdown
-- Headings → `#`, `##`, etc.
-- Tables → markdown tables
-- Images → `<!-- gdoc:image id="..." -->` comments
+Most Google Docs MCP servers have no concurrency protection, making them vulnerable to silent data loss when documents are edited concurrently.
 
-**Editing:**
-- `**bold**`, `*italic*`, `~~strikethrough~~`, `[links](url)`
-- Tables: provide full markdown table to replace existing table
-- Headings, lists, images: not yet supported for editing
+| Repository | Concurrency Control |
+|------------|---------------------|
+| **gdoc-mcp** (this project) | Text-based verification |
+| a-bonus/google-docs-mcp | None (index-based ops) |
+| phact/mcp-google-docs | None (read-then-write race) |
+| Meerkats-Ai/google-docs-mcp-server | None |
+| VolksRat71/google-workspace-mcp | Revision tools exist but not used for edits |
+| piotr-agier/google-drive-mcp | None |
+| isaacphi/mcp-gdrive | None (Sheets only) |
 
-## Examples
+**How gdoc-mcp handles concurrency:**
 
+1. `gdoc_read` must be called first (caches revision, ensures you've seen the content)
+2. `gdoc_edit` fetches current document state
+3. Verifies `old_text` still exists in document
+4. If found, edit proceeds; if not, error with message to re-read
+
+This prevents silent overwrites while allowing concurrent edits to different parts of a document.
+
+## Limitations
+
+- **Edit scope**: Only inline text formatting can be edited. Tables, headings, lists, and images are readable but not directly editable.
+- **Complex formatting**: Colors, fonts, and nested styles aren't preserved.
+- **No document creation**: Only works with existing documents.
+
+## Development
+
+```bash
+npm run dev      # Watch mode
+npm test         # Run tests
 ```
-# Read first 20 lines of a doc
-gdoc_read(docId: "1ABC...", limit: 20)
 
-# Search for text
-gdoc_search(docId: "1ABC...", query: "TODO", context: 3)
+## License
 
-# Edit text with formatting
-gdoc_edit(docId: "1ABC...", old_text: "hello", new_text: "**hello**")
-
-# Replace a table
-gdoc_edit(docId: "1ABC...",
-  old_text: "| A | B |\n| --- | --- |\n| 1 | 2 |",
-  new_text: "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |")
-```
-
-## Concurrency
-
-Edits require reading the doc first. The server verifies that `old_text` still exists before applying changes - if someone else modified that text, you'll get an error asking you to re-read.
-
-This is lenient concurrency control (like Claude Code's file editing) rather than strict locking.
+MIT
