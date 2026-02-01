@@ -217,21 +217,58 @@ export function findTextRange(
     }
   }
 
-  // Count occurrences
+  // First try exact match
   let matchCount = 0;
   let pos = -1;
   let searchPos = 0;
   while ((searchPos = fullText.indexOf(searchText, searchPos)) !== -1) {
     if (matchCount === 0) pos = searchPos;
     matchCount++;
-    searchPos += 1; // Move past this match to find overlapping matches too
+    searchPos += 1;
+  }
+
+  if (pos !== -1) {
+    return {
+      startIndex: indexMap[pos],
+      endIndex: indexMap[pos + searchText.length - 1] + 1,
+      matchCount,
+    };
+  }
+
+  // If exact match fails, try with normalized whitespace
+  // This handles cases where markdown shows consecutive lines but doc has blank paragraphs
+  const normalizedSearch = searchText.replace(/\n+/g, '\n');
+  const normalizedFull = fullText.replace(/\n+/g, '\n');
+
+  // Build mapping from normalized positions back to original
+  const normToOrigMap: number[] = [];
+  let normIdx = 0;
+  for (let i = 0; i < fullText.length; i++) {
+    if (fullText[i] === '\n' && i > 0 && fullText[i - 1] === '\n') {
+      continue; // Skip consecutive newlines
+    }
+    normToOrigMap[normIdx] = i;
+    normIdx++;
+  }
+
+  matchCount = 0;
+  pos = -1;
+  searchPos = 0;
+  while ((searchPos = normalizedFull.indexOf(normalizedSearch, searchPos)) !== -1) {
+    if (matchCount === 0) pos = searchPos;
+    matchCount++;
+    searchPos += 1;
   }
 
   if (pos === -1) return null;
 
+  // Map back to original indices
+  const origStart = normToOrigMap[pos];
+  const origEnd = normToOrigMap[pos + normalizedSearch.length - 1];
+
   return {
-    startIndex: indexMap[pos],
-    endIndex: indexMap[pos + searchText.length - 1] + 1,
+    startIndex: indexMap[origStart],
+    endIndex: indexMap[origEnd] + 1,
     matchCount,
   };
 }
