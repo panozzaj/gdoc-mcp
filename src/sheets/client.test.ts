@@ -164,6 +164,22 @@ describe('Google Sheets Client', () => {
       );
     });
 
+    it('does not double-prefix range that already contains sheet name', async () => {
+      mockSheetsClient.spreadsheets.get.mockResolvedValue({
+        data: createMockMeta('Test', [{ title: 'Data' }, { title: '2025' }]),
+      });
+      mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
+        data: { values: [['A1']] },
+      });
+
+      // Range already has sheet prefix - should not become "Data!2025!A1:E20"
+      await readSheet('test-spreadsheet-id', undefined, '2025!A1:E20');
+
+      expect(mockSheetsClient.spreadsheets.values.get).toHaveBeenCalledWith(
+        expect.objectContaining({ range: '2025!A1:E20' })
+      );
+    });
+
     it('caches formulas for concurrency control', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),

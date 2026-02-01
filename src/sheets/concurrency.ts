@@ -104,7 +104,9 @@ export function cacheFormulas(
       const cell = row[colIdx];
       const ref = `${sheetName}!${cellRef(startCol + colIdx, startRow + rowIdx)}`;
       // Store formula if starts with =, otherwise store null (literal value)
-      cache.set(ref, cell?.startsWith('=') ? cell : null);
+      // Cell can be number/boolean/etc from API, so convert to string first
+      const cellStr = cell != null ? String(cell) : null;
+      cache.set(ref, cellStr?.startsWith('=') ? cellStr : null);
     }
   }
 }

@@ -87,7 +87,10 @@ export async function readSheet(
   }
 
   const sheetTitle = targetSheet.properties?.title || 'Sheet1';
-  const readRange = range ? `${sheetTitle}!${range}` : sheetTitle;
+  // Don't prefix if range already includes sheet name (has !)
+  const readRange = range
+    ? range.includes('!') ? range : `${sheetTitle}!${range}`
+    : sheetTitle;
 
   // Read both values and formulas
   const [valuesResponse, formulasResponse] = await Promise.all([

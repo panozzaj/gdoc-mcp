@@ -107,6 +107,19 @@ describe('Sheets Concurrency', () => {
       expect(getCachedFormula('test-spreadsheet', 'Sheet1', 2, 2)).toBeNull(); // null
     });
 
+    it('handles numeric cell values (not strings)', () => {
+      // Sheets API can return numbers, booleans, etc. - not just strings
+      cacheFormulas('test-spreadsheet', 'Sheet1', 1, 1, [
+        [123, 45.67, true, null] as any,
+      ]);
+
+      // All non-formula values should be cached as null
+      expect(getCachedFormula('test-spreadsheet', 'Sheet1', 1, 1)).toBeNull();
+      expect(getCachedFormula('test-spreadsheet', 'Sheet1', 2, 1)).toBeNull();
+      expect(getCachedFormula('test-spreadsheet', 'Sheet1', 3, 1)).toBeNull();
+      expect(getCachedFormula('test-spreadsheet', 'Sheet1', 4, 1)).toBeNull();
+    });
+
     it('returns undefined for cells not read', () => {
       expect(getCachedFormula('test-spreadsheet', 'Sheet1', 1, 1)).toBeUndefined();
     });
