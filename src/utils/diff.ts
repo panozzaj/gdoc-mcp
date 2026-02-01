@@ -4,6 +4,9 @@
  * Outputs ANSI-colored diff that renders in Claude Code.
  */
 
+// Number of context lines to show around changes
+const CONTEXT_LINES = 1;
+
 // ANSI escape codes for colored diff output
 const ANSI = {
   reset: '\x1b[0m',
@@ -16,6 +19,8 @@ const ANSI = {
   addedBg: '\x1b[48;5;22m',
   // Text color
   white: '\x1b[38;5;231m',
+  // Context line color (dim)
+  context: '\x1b[38;5;245m',
   // Reset colors
   resetFg: '\x1b[39m',
   resetBg: '\x1b[49m',
@@ -130,42 +135,90 @@ function formatAddedLine(line: string): string {
 }
 
 /**
+ * Format a context line (unchanged) with dim styling.
+ */
+function formatContextLine(line: string): string {
+  return `${ANSI.context}  ${line}${ANSI.reset}`;
+}
+
+/**
  * Format multi-line changes with ANSI colors.
- * Only shows changed lines, no context.
+ * Shows context lines around changes for readability.
  */
 function formatLineDiff(oldLines: string[], newLines: string[]): string {
-  const result: string[] = [];
+  // Build list of changes with their positions
+  const changes: Array<{
+    type: 'remove' | 'add' | 'context';
+    line: string;
+    oldIdx?: number;
+    newIdx?: number;
+  }> = [];
 
-  // Simple LCS-based diff
   const lcs = computeLCS(oldLines, newLines);
   let oldIdx = 0;
   let newIdx = 0;
 
   for (const common of lcs) {
-    // Output removed lines
+    // Mark removed lines
     while (oldIdx < common.oldIndex) {
-      result.push(formatRemovedLine(oldLines[oldIdx]));
+      changes.push({ type: 'remove', line: oldLines[oldIdx], oldIdx });
       oldIdx++;
     }
-    // Output added lines
+    // Mark added lines
     while (newIdx < common.newIndex) {
-      result.push(formatAddedLine(newLines[newIdx]));
+      changes.push({ type: 'add', line: newLines[newIdx], newIdx });
       newIdx++;
     }
-    // Skip common lines (no context)
+    // Mark context line
+    changes.push({ type: 'context', line: newLines[newIdx], oldIdx, newIdx });
     oldIdx++;
     newIdx++;
   }
 
-  // Output remaining removed lines
+  // Remaining removed lines
   while (oldIdx < oldLines.length) {
-    result.push(formatRemovedLine(oldLines[oldIdx]));
+    changes.push({ type: 'remove', line: oldLines[oldIdx], oldIdx });
     oldIdx++;
   }
-  // Output remaining added lines
+  // Remaining added lines
   while (newIdx < newLines.length) {
-    result.push(formatAddedLine(newLines[newIdx]));
+    changes.push({ type: 'add', line: newLines[newIdx], newIdx });
     newIdx++;
+  }
+
+  // Determine which context lines to show (within CONTEXT_LINES of a change)
+  const showLine = new Set<number>();
+  for (let i = 0; i < changes.length; i++) {
+    if (changes[i].type !== 'context') {
+      // Mark surrounding context lines to show
+      for (let j = Math.max(0, i - CONTEXT_LINES); j <= Math.min(changes.length - 1, i + CONTEXT_LINES); j++) {
+        showLine.add(j);
+      }
+    }
+  }
+
+  // Build output with separators for gaps
+  const result: string[] = [];
+  let lastShown = -1;
+
+  for (let i = 0; i < changes.length; i++) {
+    if (!showLine.has(i)) continue;
+
+    // Add separator if there's a gap in shown lines
+    if (lastShown >= 0 && i > lastShown + 1) {
+      result.push(`${ANSI.dim}...${ANSI.reset}`);
+    }
+
+    const change = changes[i];
+    if (change.type === 'remove') {
+      result.push(formatRemovedLine(change.line));
+    } else if (change.type === 'add') {
+      result.push(formatAddedLine(change.line));
+    } else {
+      result.push(formatContextLine(change.line));
+    }
+
+    lastShown = i;
   }
 
   return result.join('\n');
