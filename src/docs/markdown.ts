@@ -1,6 +1,11 @@
 // Markdown parsing and formatting utilities for Google Docs integration
 // Handles conversion between markdown syntax and Google Docs API formatting
 
+export interface TableData {
+  headers: string[];
+  rows: string[][];
+}
+
 export interface TextFormatting {
   bold?: boolean;
   italic?: boolean;
@@ -177,4 +182,63 @@ export function buildFormattingRequests(
   }
 
   return requests;
+}
+
+/**
+ * Check if text is a markdown table.
+ */
+export function isMarkdownTable(text: string): boolean {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return false;
+
+  // Check for table structure: | cell | cell |
+  const hasTableRows = lines.every(line => line.trim().startsWith('|') && line.trim().endsWith('|'));
+  if (!hasTableRows) return false;
+
+  // Check for separator row (| --- | --- |)
+  const hasSeparator = lines.some(line => /^\|\s*[-:]+\s*(\|\s*[-:]+\s*)+\|$/.test(line.trim()));
+  return hasSeparator;
+}
+
+/**
+ * Parse a markdown table into structured data.
+ */
+export function parseMarkdownTable(text: string): TableData | null {
+  if (!isMarkdownTable(text)) return null;
+
+  const lines = text.trim().split('\n');
+  const dataLines = lines.filter(line => !/^\|\s*[-:]+\s*(\|\s*[-:]+\s*)+\|$/.test(line.trim()));
+
+  if (dataLines.length === 0) return null;
+
+  const parseRow = (line: string): string[] => {
+    return line
+      .split('|')
+      .slice(1, -1) // Remove empty strings from leading/trailing |
+      .map(cell => cell.trim());
+  };
+
+  const headers = parseRow(dataLines[0]);
+  const rows = dataLines.slice(1).map(parseRow);
+
+  return { headers, rows };
+}
+
+/**
+ * Build Google Docs API requests to insert a table.
+ * Returns the insertTable request. Cell content must be added in a subsequent request
+ * after getting the updated document structure.
+ */
+export function buildInsertTableRequest(
+  index: number,
+  numRows: number,
+  numColumns: number
+): object {
+  return {
+    insertTable: {
+      location: { index },
+      rows: numRows,
+      columns: numColumns,
+    },
+  };
 }

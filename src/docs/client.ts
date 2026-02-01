@@ -1,5 +1,5 @@
 import { getDocsClient, getDriveClient } from '../auth.js';
-import { convertToMarkdown, findTextRange } from './converter.js';
+import { convertToMarkdown, findTextRange, findTableRange } from './converter.js';
 import {
   getCachedRevision,
   setCachedRevision,
@@ -10,6 +10,9 @@ import {
   parseMarkdown,
   hasMarkdownFormatting,
   buildFormattingRequests,
+  isMarkdownTable,
+  parseMarkdownTable,
+  buildInsertTableRequest,
 } from './markdown.js';
 
 export interface DocInfo {
@@ -71,11 +74,101 @@ export async function editDoc(
   const response = await docs.documents.get({ documentId: docId });
   const doc = response.data;
 
-  // 3. Parse markdown from old_text to get raw text for matching
+  // 3. Check if old_text is a markdown table (table-to-table replacement)
+  if (isMarkdownTable(oldText)) {
+    const tableRange = findTableRange(doc, oldText);
+    if (!tableRange) {
+      throw new Error(
+        `Table not found in document. The document may have been modified. Try reading it again.`
+      );
+    }
+    if (tableRange.matchCount > 1) {
+      throw new Error(
+        `Multiple matching tables found (${tableRange.matchCount}). Cannot determine which to replace.`
+      );
+    }
+
+    // Parse new table data
+    const tableData = parseMarkdownTable(newText);
+    if (!tableData) {
+      throw new Error('new_text must also be a valid markdown table when replacing a table');
+    }
+
+    const numRows = tableData.rows.length + 1;
+    const numColumns = tableData.headers.length;
+
+    // Delete old table, insert new one
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: {
+        requests: [
+          {
+            deleteContentRange: {
+              range: { startIndex: tableRange.startIndex, endIndex: tableRange.endIndex },
+            },
+          },
+          buildInsertTableRequest(tableRange.startIndex, numRows, numColumns),
+        ],
+      },
+    });
+
+    // Get updated doc to find cell indices
+    const updatedDoc = await docs.documents.get({ documentId: docId });
+    const body = updatedDoc.data.body?.content || [];
+
+    const tableElement = body.find(
+      (el: any) => el.table && el.startIndex !== undefined && el.startIndex >= tableRange.startIndex
+    );
+
+    if (tableElement?.table) {
+      const cellRequests: object[] = [];
+      const tableRows = tableElement.table.tableRows || [];
+      const allRows = [tableData.headers, ...tableData.rows];
+
+      for (let rowIdx = 0; rowIdx < tableRows.length && rowIdx < allRows.length; rowIdx++) {
+        const cells = tableRows[rowIdx].tableCells || [];
+        const rowData = allRows[rowIdx];
+
+        for (let colIdx = 0; colIdx < cells.length && colIdx < rowData.length; colIdx++) {
+          const cell = cells[colIdx];
+          const cellContent = cell.content?.[0];
+          if (cellContent?.startIndex !== undefined && rowData[colIdx]) {
+            cellRequests.push({
+              insertText: {
+                location: { index: cellContent.startIndex },
+                text: rowData[colIdx],
+              },
+            });
+          }
+        }
+      }
+
+      if (cellRequests.length > 0) {
+        // Sort by descending index so earlier insertions don't shift later indices
+        cellRequests.sort((a: any, b: any) =>
+          b.insertText.location.index - a.insertText.location.index
+        );
+        await docs.documents.batchUpdate({
+          documentId: docId,
+          requestBody: { requests: cellRequests },
+        });
+      }
+    }
+
+    const finalDoc = await docs.documents.get({ documentId: docId });
+    setCachedRevision(docId, finalDoc.data.revisionId || '');
+
+    return {
+      success: true,
+      message: `Replaced table with ${numRows}x${numColumns} table`,
+    };
+  }
+
+  // 4. Parse markdown from old_text to get raw text for matching
   const parsedOld = parseMarkdown(oldText);
   const searchText = parsedOld.rawText;
 
-  // 4. Find the text to replace (fails if text no longer exists or is ambiguous)
+  // 5. Find the text to replace (fails if text no longer exists or is ambiguous)
   const range = findTextRange(doc, searchText);
   if (!range) {
     const displayText = hasMarkdownFormatting(oldText) ? `${oldText} (raw: "${searchText}")` : oldText;
@@ -92,10 +185,89 @@ export async function editDoc(
     );
   }
 
-  // 5. Parse markdown from new_text to get raw text and formatting
+  // 6. Check if new_text is a markdown table (special handling required)
+  if (isMarkdownTable(newText)) {
+    const tableData = parseMarkdownTable(newText);
+    if (tableData) {
+      // Tables require multi-step insertion:
+      // Step 1: Delete old content and insert table structure
+      const numRows = tableData.rows.length + 1; // +1 for header
+      const numColumns = tableData.headers.length;
+
+      await docs.documents.batchUpdate({
+        documentId: docId,
+        requestBody: {
+          requests: [
+            {
+              deleteContentRange: {
+                range: { startIndex: range.startIndex, endIndex: range.endIndex },
+              },
+            },
+            buildInsertTableRequest(range.startIndex, numRows, numColumns),
+          ],
+        },
+      });
+
+      // Step 2: Get updated doc to find cell indices
+      const updatedDoc = await docs.documents.get({ documentId: docId });
+      const body = updatedDoc.data.body?.content || [];
+
+      // Find the table we just inserted
+      const tableElement = body.find(
+        (el: any) => el.table && el.startIndex !== undefined && el.startIndex >= range.startIndex
+      );
+
+      if (tableElement?.table) {
+        const cellRequests: object[] = [];
+        const tableRows = tableElement.table.tableRows || [];
+
+        // Insert cell content (header row first, then data rows)
+        const allRows = [tableData.headers, ...tableData.rows];
+        for (let rowIdx = 0; rowIdx < tableRows.length && rowIdx < allRows.length; rowIdx++) {
+          const cells = tableRows[rowIdx].tableCells || [];
+          const rowData = allRows[rowIdx];
+
+          for (let colIdx = 0; colIdx < cells.length && colIdx < rowData.length; colIdx++) {
+            const cell = cells[colIdx];
+            const cellContent = cell.content?.[0];
+            if (cellContent?.startIndex !== undefined && rowData[colIdx]) {
+              cellRequests.push({
+                insertText: {
+                  location: { index: cellContent.startIndex },
+                  text: rowData[colIdx],
+                },
+              });
+            }
+          }
+        }
+
+        if (cellRequests.length > 0) {
+          // Sort by descending index so earlier insertions don't shift later indices
+          cellRequests.sort((a: any, b: any) =>
+            b.insertText.location.index - a.insertText.location.index
+          );
+          await docs.documents.batchUpdate({
+            documentId: docId,
+            requestBody: { requests: cellRequests },
+          });
+        }
+      }
+
+      // Update cached revision
+      const finalDoc = await docs.documents.get({ documentId: docId });
+      setCachedRevision(docId, finalDoc.data.revisionId || '');
+
+      return {
+        success: true,
+        message: `Inserted ${numRows}x${numColumns} table`,
+      };
+    }
+  }
+
+  // 6. Parse markdown from new_text to get raw text and formatting
   const parsedNew = parseMarkdown(newText);
 
-  // 6. Build requests: delete old, insert new text, then apply formatting
+  // 7. Build requests: delete old, insert new text, then apply formatting
   const requests: object[] = [
     {
       deleteContentRange: {
@@ -113,7 +285,7 @@ export async function editDoc(
     },
   ];
 
-  // 7. Add formatting requests for each segment
+  // 8. Add formatting requests for each segment
   let currentIndex = range.startIndex;
   for (const segment of parsedNew.segments) {
     const segmentEnd = currentIndex + segment.text.length;
@@ -126,13 +298,13 @@ export async function editDoc(
     currentIndex = segmentEnd;
   }
 
-  // 8. Apply all changes in one batch
+  // 9. Apply all changes in one batch
   await docs.documents.batchUpdate({
     documentId: docId,
     requestBody: { requests },
   });
 
-  // 9. Update the cached revision
+  // 10. Update the cached revision
   const updated = await docs.documents.get({ documentId: docId });
   const newRevision = updated.data.revisionId || '';
   setCachedRevision(docId, newRevision);

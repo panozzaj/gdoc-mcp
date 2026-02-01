@@ -145,6 +145,51 @@ function convertTable(table: Table): string {
   return lines.join('\n');
 }
 
+// Find a table in the document that matches the given markdown table content
+// Returns the table's range if found
+export function findTableRange(
+  doc: Document,
+  tableMarkdown: string
+): { startIndex: number; endIndex: number; matchCount: number } | null {
+  const body = doc.body;
+  if (!body?.content) return null;
+
+  // Normalize the search markdown (remove extra whitespace, normalize separators)
+  const normalizeTable = (md: string): string => {
+    return md
+      .split('\n')
+      .filter(line => !/^\|\s*[-:]+/.test(line)) // Remove separator rows
+      .map(line => line.replace(/\s+/g, ' ').trim())
+      .join('\n');
+  };
+
+  const searchNormalized = normalizeTable(tableMarkdown);
+  let matchCount = 0;
+  let matchedElement: any = null;
+
+  for (const element of body.content) {
+    if (element.table) {
+      const tableMarkdownContent = convertTable(element.table);
+      const tableNormalized = normalizeTable(tableMarkdownContent);
+
+      if (tableNormalized === searchNormalized) {
+        matchCount++;
+        if (matchCount === 1) {
+          matchedElement = element;
+        }
+      }
+    }
+  }
+
+  if (!matchedElement) return null;
+
+  return {
+    startIndex: matchedElement.startIndex,
+    endIndex: matchedElement.endIndex,
+    matchCount,
+  };
+}
+
 // Find text in document and return its range
 // Throws if text appears multiple times (require unique match like Claude Code's Edit tool)
 export function findTextRange(
