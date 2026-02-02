@@ -2,7 +2,7 @@ import { FastMCP } from 'fastmcp';
 import { z } from 'zod';
 import { readDoc, editDoc, getDocInfo, listDocs, searchDoc } from './docs/client.js';
 import { NotReadError } from './docs/concurrency.js';
-import { readSheet, editSheet, appendSheet, getSheetInfo } from './sheets/client.js';
+import { readSheet, editSheet, appendSheet, addSheet, getSheetInfo } from './sheets/client.js';
 import {
   NotReadError as SheetNotReadError,
   ConcurrentModificationError,
@@ -263,6 +263,22 @@ server.addTool({
   }),
   execute: async ({ spreadsheetId, values, sheet }) => {
     const result = await appendSheet(spreadsheetId, values, sheet);
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+    };
+  },
+});
+
+// Tool: Add a new sheet to a spreadsheet
+server.addTool({
+  name: 'gsheet_add_sheet',
+  description: 'Add a new sheet (tab) to an existing Google Spreadsheet.',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+    title: z.string().describe('Name for the new sheet'),
+  }),
+  execute: async ({ spreadsheetId, title }) => {
+    const result = await addSheet(spreadsheetId, title);
     return {
       content: [{ type: 'text' as const, text: result.message }],
     };

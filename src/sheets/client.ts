@@ -395,3 +395,35 @@ export async function appendSheet(
     updatedRange,
   };
 }
+
+export async function addSheet(
+  spreadsheetIdOrUrl: string,
+  title: string
+): Promise<{ success: boolean; message: string; sheetId: number }> {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl);
+  const sheets = await getSheetsClient();
+
+  const response = await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          addSheet: {
+            properties: {
+              title,
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  const newSheet = response.data.replies?.[0]?.addSheet?.properties;
+  const sheetId = newSheet?.sheetId ?? 0;
+
+  return {
+    success: true,
+    message: `Added sheet "${title}" to spreadsheet`,
+    sheetId,
+  };
+}

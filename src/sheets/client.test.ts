@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { getSheetInfo, readSheet, editSheet, appendSheet } from './client.js';
+import { getSheetInfo, readSheet, editSheet, appendSheet, addSheet } from './client.js';
 import { clearCache, NotReadError, ConcurrentModificationError } from './concurrency.js';
 
 // Mock the auth module
@@ -30,6 +30,7 @@ describe('Google Sheets Client', () => {
   let mockSheetsClient: {
     spreadsheets: {
       get: ReturnType<typeof vi.fn>;
+      batchUpdate: ReturnType<typeof vi.fn>;
       values: {
         get: ReturnType<typeof vi.fn>;
         update: ReturnType<typeof vi.fn>;
@@ -44,6 +45,7 @@ describe('Google Sheets Client', () => {
     mockSheetsClient = {
       spreadsheets: {
         get: vi.fn(),
+        batchUpdate: vi.fn(),
         values: {
           get: vi.fn(),
           update: vi.fn(),
@@ -389,6 +391,61 @@ describe('Google Sheets Client', () => {
 
       expect(mockSheetsClient.spreadsheets.values.append).toHaveBeenCalledWith(
         expect.objectContaining({ range: 'FirstSheet' })
+      );
+    });
+  });
+
+  describe('addSheet', () => {
+    it('adds a new sheet to the spreadsheet', async () => {
+      mockSheetsClient.spreadsheets.batchUpdate.mockResolvedValue({
+        data: {
+          replies: [
+            {
+              addSheet: {
+                properties: {
+                  sheetId: 123,
+                  title: 'NewSheet',
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await addSheet('test-spreadsheet-id', 'NewSheet');
+
+      expect(result.success).toBe(true);
+      expect(result.sheetId).toBe(123);
+      expect(result.message).toContain('NewSheet');
+      expect(mockSheetsClient.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          spreadsheetId: 'test-spreadsheet-id',
+          requestBody: {
+            requests: [
+              {
+                addSheet: {
+                  properties: {
+                    title: 'NewSheet',
+                  },
+                },
+              },
+            ],
+          },
+        })
+      );
+    });
+
+    it('extracts spreadsheet ID from URL', async () => {
+      mockSheetsClient.spreadsheets.batchUpdate.mockResolvedValue({
+        data: {
+          replies: [{ addSheet: { properties: { sheetId: 456, title: 'Test' } } }],
+        },
+      });
+
+      await addSheet('https://docs.google.com/spreadsheets/d/abc123xyz/edit', 'Test');
+
+      expect(mockSheetsClient.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ spreadsheetId: 'abc123xyz' })
       );
     });
   });
