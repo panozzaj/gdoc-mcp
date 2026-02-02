@@ -6,6 +6,9 @@ import {
   cacheFormulas,
   getCachedFormula,
   cacheDimensions,
+  cacheSheetNames,
+  detectSheetRename,
+  migrateCacheForRename,
   hasReadRange,
   getCachedRange,
   invalidateRange,
@@ -227,6 +230,114 @@ describe('Sheets Concurrency', () => {
       const cells = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
       const error = new ConcurrentModificationError(cells);
       expect(error.message).toContain('and 2 more');
+    });
+  });
+
+  describe('sheet rename detection', () => {
+    describe('cacheSheetNames and detectSheetRename', () => {
+      it('detects no rename when sheet names match', () => {
+        cacheSheetNames('test-spreadsheet', [
+          { id: 0, title: 'Sheet1' },
+          { id: 1, title: 'Sheet2' },
+        ]);
+
+        expect(detectSheetRename('test-spreadsheet', 'Sheet1', 0)).toBeNull();
+        expect(detectSheetRename('test-spreadsheet', 'Sheet2', 1)).toBeNull();
+      });
+
+      it('detects rename when sheet name differs for same ID', () => {
+        cacheSheetNames('test-spreadsheet', [
+          { id: 0, title: 'OldName' },
+        ]);
+
+        const oldName = detectSheetRename('test-spreadsheet', 'NewName', 0);
+        expect(oldName).toBe('OldName');
+      });
+
+      it('returns null when no cached names exist', () => {
+        expect(detectSheetRename('unknown-spreadsheet', 'Sheet1', 0)).toBeNull();
+      });
+
+      it('returns null when sheet ID is not in cache', () => {
+        cacheSheetNames('test-spreadsheet', [
+          { id: 0, title: 'Sheet1' },
+        ]);
+
+        expect(detectSheetRename('test-spreadsheet', 'NewSheet', 999)).toBeNull();
+      });
+    });
+
+    describe('migrateCacheForRename', () => {
+      it('migrates cell cache entries from old name to new name', () => {
+        cacheFormulas('test-spreadsheet', 'Tasks', 1, 1, [
+          ['=A2+B2', 'value1'],
+          ['=SUM(A1:A10)', 'value2'],
+        ]);
+
+        // Verify old names exist
+        expect(getCachedFormula('test-spreadsheet', 'Tasks', 1, 1)).toBe('=A2+B2');
+        expect(getCachedFormula('test-spreadsheet', 'Tasks', 2, 1)).toBeNull();
+
+        // Migrate
+        migrateCacheForRename('test-spreadsheet', 'Tasks', 'MyTasks');
+
+        // Old names should no longer exist
+        expect(getCachedFormula('test-spreadsheet', 'Tasks', 1, 1)).toBeUndefined();
+        expect(getCachedFormula('test-spreadsheet', 'Tasks', 2, 1)).toBeUndefined();
+
+        // New names should have the values
+        expect(getCachedFormula('test-spreadsheet', 'MyTasks', 1, 1)).toBe('=A2+B2');
+        expect(getCachedFormula('test-spreadsheet', 'MyTasks', 2, 1)).toBeNull();
+        expect(getCachedFormula('test-spreadsheet', 'MyTasks', 1, 2)).toBe('=SUM(A1:A10)');
+        expect(getCachedFormula('test-spreadsheet', 'MyTasks', 2, 2)).toBeNull();
+      });
+
+      it('updates sheet ID to name mapping', () => {
+        cacheSheetNames('test-spreadsheet', [
+          { id: 0, title: 'Tasks' },
+        ]);
+
+        migrateCacheForRename('test-spreadsheet', 'Tasks', 'MyTasks');
+
+        // After migration, detecting rename should return null since mapping is updated
+        expect(detectSheetRename('test-spreadsheet', 'MyTasks', 0)).toBeNull();
+      });
+
+      it('preserves other sheets in cache', () => {
+        cacheFormulas('test-spreadsheet', 'Tasks', 1, 1, [['=A2']]);
+        cacheFormulas('test-spreadsheet', 'Other', 1, 1, [['=B2']]);
+
+        migrateCacheForRename('test-spreadsheet', 'Tasks', 'MyTasks');
+
+        // Other sheet should be unchanged
+        expect(getCachedFormula('test-spreadsheet', 'Other', 1, 1)).toBe('=B2');
+        // Migrated sheet should work
+        expect(getCachedFormula('test-spreadsheet', 'MyTasks', 1, 1)).toBe('=A2');
+      });
+
+      it('handles migration when no cache exists', () => {
+        // Should not throw
+        expect(() => migrateCacheForRename('unknown', 'Old', 'New')).not.toThrow();
+      });
+    });
+
+    describe('hasReadRange after rename', () => {
+      it('finds cells after migration', () => {
+        cacheFormulas('test-spreadsheet', 'Tasks', 1, 1, [
+          ['a', 'b'],
+          ['c', 'd'],
+        ]);
+
+        // Before migration, old name works, new name doesn't
+        expect(hasReadRange('test-spreadsheet', 'Tasks!A1:B2')).toBe(true);
+        expect(hasReadRange('test-spreadsheet', 'MyTasks!A1:B2')).toBe(false);
+
+        migrateCacheForRename('test-spreadsheet', 'Tasks', 'MyTasks');
+
+        // After migration, new name works, old name doesn't
+        expect(hasReadRange('test-spreadsheet', 'Tasks!A1:B2')).toBe(false);
+        expect(hasReadRange('test-spreadsheet', 'MyTasks!A1:B2')).toBe(true);
+      });
     });
   });
 });

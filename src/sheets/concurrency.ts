@@ -12,6 +12,10 @@ const cellCache = new Map<string, Map<string, string | null>>();
 // Sheet dimensions cache for detecting deleted rows/cols
 const dimensionsCache = new Map<string, { sheetTitle: string; rows: number; cols: number }[]>();
 
+// Sheet ID to name mapping: spreadsheetId -> sheetId -> sheetName
+// Used to detect sheet renames
+const sheetIdToNameCache = new Map<string, Map<number, string>>();
+
 /**
  * Convert column number to letter (1 -> A, 26 -> Z, 27 -> AA)
  */
@@ -126,6 +130,83 @@ export function cacheDimensions(
 }
 
 /**
+ * Cache sheet ID to name mapping.
+ * Used to detect when sheets are renamed.
+ */
+export function cacheSheetNames(
+  spreadsheetId: string,
+  sheets: { id: number; title: string }[]
+): void {
+  const mapping = new Map<number, string>();
+  for (const sheet of sheets) {
+    mapping.set(sheet.id, sheet.title);
+  }
+  sheetIdToNameCache.set(spreadsheetId, mapping);
+}
+
+/**
+ * Check if a sheet name was previously known under a different name.
+ * Returns the old name if the sheet was renamed, null otherwise.
+ */
+export function detectSheetRename(
+  spreadsheetId: string,
+  currentSheetName: string,
+  currentSheetId: number
+): string | null {
+  const mapping = sheetIdToNameCache.get(spreadsheetId);
+  if (!mapping) return null;
+
+  const cachedName = mapping.get(currentSheetId);
+  if (cachedName && cachedName !== currentSheetName) {
+    return cachedName;
+  }
+  return null;
+}
+
+/**
+ * Migrate cache entries from old sheet name to new sheet name.
+ * Called when a sheet rename is detected.
+ */
+export function migrateCacheForRename(
+  spreadsheetId: string,
+  oldSheetName: string,
+  newSheetName: string
+): void {
+  // Migrate cell cache entries if present
+  const cache = cellCache.get(spreadsheetId);
+  if (cache) {
+    // Find all entries with the old sheet name and migrate them
+    const prefix = `${oldSheetName}!`;
+    const entriesToMigrate: [string, string | null][] = [];
+
+    for (const [ref, formula] of cache.entries()) {
+      if (ref.startsWith(prefix)) {
+        entriesToMigrate.push([ref, formula]);
+      }
+    }
+
+    // Delete old entries and add new ones
+    for (const [oldRef, formula] of entriesToMigrate) {
+      cache.delete(oldRef);
+      const cellPart = oldRef.substring(prefix.length);
+      const newRef = `${newSheetName}!${cellPart}`;
+      cache.set(newRef, formula);
+    }
+  }
+
+  // Update the sheet name mapping
+  const mapping = sheetIdToNameCache.get(spreadsheetId);
+  if (mapping) {
+    for (const [id, name] of mapping.entries()) {
+      if (name === oldSheetName) {
+        mapping.set(id, newSheetName);
+        break;
+      }
+    }
+  }
+}
+
+/**
  * Get cached formula for a cell.
  * Returns undefined if cell was never read.
  */
@@ -228,6 +309,7 @@ export function invalidateRange(
 export function clearCache(spreadsheetId: string): void {
   cellCache.delete(spreadsheetId);
   dimensionsCache.delete(spreadsheetId);
+  sheetIdToNameCache.delete(spreadsheetId);
 }
 
 /**
