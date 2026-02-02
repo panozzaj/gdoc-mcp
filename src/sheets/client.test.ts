@@ -164,6 +164,44 @@ describe('Google Sheets Client', () => {
       );
     });
 
+    it('throws error when range exceeds sheet row bounds', async () => {
+      mockSheetsClient.spreadsheets.get.mockResolvedValue({
+        data: createMockMeta('Test', [{ title: 'Sheet1', rows: 10, cols: 5 }]),
+      });
+
+      await expect(
+        readSheet('test-spreadsheet-id', undefined, 'A1:A20')
+      ).rejects.toThrow('Range exceeds sheet bounds: requested row 20 but sheet "Sheet1" only has 10 rows');
+    });
+
+    it('throws error when range exceeds sheet column bounds', async () => {
+      mockSheetsClient.spreadsheets.get.mockResolvedValue({
+        data: createMockMeta('Test', [{ title: 'Sheet1', rows: 100, cols: 3 }]),
+      });
+
+      await expect(
+        readSheet('test-spreadsheet-id', undefined, 'A1:E1')
+      ).rejects.toThrow('Range exceeds sheet bounds: requested column 5 but sheet "Sheet1" only has 3 columns');
+    });
+
+    it('pads empty trailing rows and columns to match requested range', async () => {
+      mockSheetsClient.spreadsheets.get.mockResolvedValue({
+        data: createMockMeta('Test', [{ title: 'Sheet1', rows: 100, cols: 26 }]),
+      });
+      // Google Sheets API truncates trailing empty rows/cols
+      mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
+        data: { values: [['A1', 'B1']] }, // Only 1 row, 2 cols returned
+      });
+
+      const result = await readSheet('test-spreadsheet-id', undefined, 'A1:C3');
+
+      // Should be padded to 3 rows × 3 cols
+      expect(result.rowCount).toBe(3);
+      expect(result.columnCount).toBe(3);
+      expect(result.content).toContain('| A1 | B1 |  |'); // First row with padding
+      expect(result.content).toContain('|  |  |  |'); // Empty rows
+    });
+
     it('does not double-prefix range that already contains sheet name', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta('Test', [{ title: 'Data' }, { title: '2025' }]),

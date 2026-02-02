@@ -2,6 +2,9 @@ import { getSheetsClient } from '../auth.js';
 import {
   cacheFormulas,
   cacheDimensions,
+  cacheSheetNames,
+  detectSheetRename,
+  migrateCacheForRename,
   getCachedRange,
   hasReadRange,
   invalidateRange,
@@ -87,10 +90,34 @@ export async function readSheet(
   }
 
   const sheetTitle = targetSheet.properties?.title || 'Sheet1';
+  const sheetRowCount = targetSheet.properties?.gridProperties?.rowCount || 1000;
+  const sheetColCount = targetSheet.properties?.gridProperties?.columnCount || 26;
+
   // Don't prefix if range already includes sheet name (has !)
   const readRange = range
     ? range.includes('!') ? range : `${sheetTitle}!${range}`
     : sheetTitle;
+
+  // Parse range to check bounds (only when explicit range provided)
+  const parsed = range ? parseRange(readRange) : null;
+  const startCol = parsed?.startCol || 1;
+  const startRow = parsed?.startRow || 1;
+  const endCol = parsed?.endCol || sheetColCount;
+  const endRow = parsed?.endRow || sheetRowCount;
+
+  // Check if requested range exceeds sheet dimensions (only for explicit ranges)
+  if (parsed) {
+    if (parsed.endRow > sheetRowCount) {
+      throw new Error(
+        `Range exceeds sheet bounds: requested row ${parsed.endRow} but sheet "${sheetTitle}" only has ${sheetRowCount} rows.`
+      );
+    }
+    if (parsed.endCol > sheetColCount) {
+      throw new Error(
+        `Range exceeds sheet bounds: requested column ${parsed.endCol} but sheet "${sheetTitle}" only has ${sheetColCount} columns.`
+      );
+    }
+  }
 
   // Read both values and formulas
   const [valuesResponse, formulasResponse] = await Promise.all([
@@ -109,12 +136,43 @@ export async function readSheet(
   const rows = valuesResponse.data.values || [];
   const formulas = formulasResponse.data.values || [];
 
+  // Pad data to match requested range dimensions (only when explicit range provided)
+  // Google Sheets API truncates trailing empty rows/cols, so we pad them back
+  let paddedFormulas: (string | null)[][];
+  let paddedRows: string[][];
+
+  if (range && parsed) {
+    // Explicit range: pad to requested dimensions
+    const requestedRows = endRow - startRow + 1;
+    const requestedCols = endCol - startCol + 1;
+
+    paddedFormulas = [];
+    for (let r = 0; r < requestedRows; r++) {
+      const sourceRow = formulas[r] || [];
+      const paddedRow: (string | null)[] = [];
+      for (let c = 0; c < requestedCols; c++) {
+        paddedRow.push(sourceRow[c] ?? null);
+      }
+      paddedFormulas.push(paddedRow);
+    }
+
+    paddedRows = [];
+    for (let r = 0; r < requestedRows; r++) {
+      const sourceRow = rows[r] || [];
+      const paddedRow: string[] = [];
+      for (let c = 0; c < requestedCols; c++) {
+        paddedRow.push(sourceRow[c] != null ? String(sourceRow[c]) : '');
+      }
+      paddedRows.push(paddedRow);
+    }
+  } else {
+    // No explicit range: use actual data as-is
+    paddedFormulas = formulas.map(row => row.map(cell => cell ?? null));
+    paddedRows = rows.map(row => row.map(cell => cell != null ? String(cell) : ''));
+  }
+
   // Cache formulas for concurrency control
-  // Determine start position from range
-  const parsed = parseRange(readRange);
-  const startCol = parsed?.startCol || 1;
-  const startRow = parsed?.startRow || 1;
-  cacheFormulas(spreadsheetId, sheetTitle, startCol, startRow, formulas);
+  cacheFormulas(spreadsheetId, sheetTitle, startCol, startRow, paddedFormulas);
 
   // Cache sheet dimensions
   cacheDimensions(
@@ -126,25 +184,29 @@ export async function readSheet(
     }))
   );
 
-  // Convert to markdown table
+  // Cache sheet ID to name mapping for rename detection
+  cacheSheetNames(
+    spreadsheetId,
+    sheetsList.map(s => ({
+      id: s.properties?.sheetId || 0,
+      title: s.properties?.title || 'Sheet',
+    }))
+  );
+
+  // Convert to markdown table (use paddedRows for consistency with cache)
   let content: string;
-  if (rows.length === 0) {
+  if (paddedRows.length === 0) {
     content = '(empty sheet)';
   } else {
     const lines: string[] = [];
 
-    // Find max columns across all rows
-    const maxCols = Math.max(...rows.map(r => r.length));
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      // Pad row to max columns
-      const cells = Array(maxCols).fill('').map((_, j) => String(row[j] ?? ''));
-      lines.push(`| ${cells.join(' | ')} |`);
+    for (let i = 0; i < paddedRows.length; i++) {
+      const row = paddedRows[i];
+      lines.push(`| ${row.join(' | ')} |`);
 
       // Add header separator after first row
       if (i === 0) {
-        lines.push(`| ${cells.map(() => '---').join(' | ')} |`);
+        lines.push(`| ${row.map(() => '---').join(' | ')} |`);
       }
     }
 
@@ -156,8 +218,8 @@ export async function readSheet(
     title: spreadsheetTitle,
     sheetTitle,
     content,
-    rowCount: rows.length,
-    columnCount: rows.length > 0 ? Math.max(...rows.map(r => r.length)) : 0,
+    rowCount: paddedRows.length,
+    columnCount: paddedRows.length > 0 ? paddedRows[0].length : 0,
   };
 }
 
@@ -170,18 +232,48 @@ export async function editSheet(
   const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl);
   const sheets = await getSheetsClient();
 
-  // Build full range with sheet name if provided
-  const fullRange = sheetName ? `${sheetName}!${range}` : range;
+  // Get current sheet metadata
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties',
+  });
+  const sheetsList = meta.data.sheets || [];
+
+  // Detect if any sheets were renamed and migrate cache entries
+  // Also track if the user passed an old sheet name
+  let resolvedSheetName = sheetName;
+  for (const sheet of sheetsList) {
+    const currentName = sheet.properties?.title;
+    const sheetId = sheet.properties?.sheetId;
+    if (currentName && sheetId != null) {
+      const oldName = detectSheetRename(spreadsheetId, currentName, sheetId);
+      if (oldName) {
+        migrateCacheForRename(spreadsheetId, oldName, currentName);
+        // If user passed the old sheet name, use the new name instead
+        if (sheetName === oldName) {
+          resolvedSheetName = currentName;
+        }
+      }
+    }
+  }
+
+  // Update sheet name cache with current names
+  cacheSheetNames(
+    spreadsheetId,
+    sheetsList.map(s => ({
+      id: s.properties?.sheetId || 0,
+      title: s.properties?.title || 'Sheet',
+    }))
+  );
 
   // Determine default sheet name if not provided
-  let defaultSheetName = sheetName;
+  let defaultSheetName = resolvedSheetName;
   if (!defaultSheetName && !range.includes('!')) {
-    const meta = await sheets.spreadsheets.get({
-      spreadsheetId,
-      fields: 'sheets.properties.title',
-    });
-    defaultSheetName = meta.data.sheets?.[0]?.properties?.title || 'Sheet1';
+    defaultSheetName = sheetsList[0]?.properties?.title || 'Sheet1';
   }
+
+  // Build full range with resolved sheet name
+  const fullRange = resolvedSheetName ? `${resolvedSheetName}!${range}` : range;
 
   // Check if cells were read first
   if (!hasReadRange(spreadsheetId, fullRange, defaultSheetName)) {
