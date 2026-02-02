@@ -14,6 +14,7 @@ An MCP server that lets Claude read and edit Google Docs and Sheets using markdo
 - Read sheets as markdown tables
 - Edit cells (formulas supported)
 - Append rows
+- Add new sheets (tabs)
 - Get sheet metadata
 
 **Concurrency Safety**
@@ -65,6 +66,7 @@ Add to your Claude MCP config:
 | `gsheet_read` | Read a Google Sheet as markdown table |
 | `gsheet_edit` | Update cells in a sheet |
 | `gsheet_append` | Append rows to a sheet |
+| `gsheet_add_sheet` | Add a new sheet (tab) to a spreadsheet |
 | `gsheet_info` | Get spreadsheet metadata |
 
 ## Comparison with Other MCP Servers
