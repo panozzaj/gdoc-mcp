@@ -1,0 +1,21 @@
+output:
+  - summary
+  - failure
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: prettier
+      glob: '*.{js,ts,json,md,yml,yaml}'
+      run: source ~/.nvm/nvm.sh && nvm use 20 && npx prettier --write {staged_files}
+      stage_fixed: true
+    - name: eslint
+      glob: '*.{js,ts}'
+      run: source ~/.nvm/nvm.sh && nvm use 20 && npx eslint --fix {staged_files}
+      stage_fixed: true
+    - name: typecheck
+      run: source ~/.nvm/nvm.sh && nvm use 20 && npx tsc --noEmit
+    - name: build
+      run: source ~/.nvm/nvm.sh && nvm use 20 && npm run build
+    - name: tests
+      run: source ~/.nvm/nvm.sh && nvm use 20 && npm test
