@@ -7,75 +7,75 @@
  */
 
 // Per-cell formula cache: spreadsheetId -> cellRef -> formula (or null for literals)
-const cellCache = new Map<string, Map<string, string | null>>();
+const cellCache = new Map<string, Map<string, string | null>>()
 
 // Sheet dimensions cache for detecting deleted rows/cols
-const dimensionsCache = new Map<string, { sheetTitle: string; rows: number; cols: number }[]>();
+const dimensionsCache = new Map<string, { sheetTitle: string; rows: number; cols: number }[]>()
 
 // Sheet ID to name mapping: spreadsheetId -> sheetId -> sheetName
 // Used to detect sheet renames
-const sheetIdToNameCache = new Map<string, Map<number, string>>();
+const sheetIdToNameCache = new Map<string, Map<number, string>>()
 
 /**
  * Convert column number to letter (1 -> A, 26 -> Z, 27 -> AA)
  */
 function columnToLetter(col: number): string {
-  let result = '';
+  let result = ''
   while (col > 0) {
-    col--;
-    result = String.fromCharCode((col % 26) + 65) + result;
-    col = Math.floor(col / 26);
+    col--
+    result = String.fromCharCode((col % 26) + 65) + result
+    col = Math.floor(col / 26)
   }
-  return result;
+  return result
 }
 
 /**
  * Parse a cell reference like "A1" into { col: 1, row: 1 }
  */
 function parseCellRef(ref: string): { col: number; row: number } | null {
-  const match = ref.match(/^([A-Z]+)(\d+)$/i);
-  if (!match) return null;
+  const match = ref.match(/^([A-Z]+)(\d+)$/i)
+  if (!match) return null
 
-  const colStr = match[1].toUpperCase();
-  let col = 0;
+  const colStr = match[1].toUpperCase()
+  let col = 0
   for (let i = 0; i < colStr.length; i++) {
-    col = col * 26 + (colStr.charCodeAt(i) - 64);
+    col = col * 26 + (colStr.charCodeAt(i) - 64)
   }
 
-  return { col, row: parseInt(match[2], 10) };
+  return { col, row: parseInt(match[2], 10) }
 }
 
 /**
  * Parse a range like "A1:B2" or "Sheet1!A1:B2" into components.
  */
 function parseRange(range: string): {
-  sheetName?: string;
-  startCol: number;
-  startRow: number;
-  endCol: number;
-  endRow: number;
+  sheetName?: string
+  startCol: number
+  startRow: number
+  endCol: number
+  endRow: number
 } | null {
   // Handle sheet prefix
-  let sheetName: string | undefined;
-  let rangeOnly = range;
+  let sheetName: string | undefined
+  let rangeOnly = range
 
   if (range.includes('!')) {
-    const parts = range.split('!');
-    sheetName = parts[0].replace(/^'|'$/g, ''); // Remove quotes if present
-    rangeOnly = parts[1];
+    const parts = range.split('!')
+    sheetName = parts[0].replace(/^'|'$/g, '') // Remove quotes if present
+    rangeOnly = parts[1]
   }
 
   // Handle single cell vs range
   if (rangeOnly.includes(':')) {
-    const [startRef, endRef] = rangeOnly.split(':');
-    const start = parseCellRef(startRef);
-    const end = parseCellRef(endRef);
-    if (!start || !end) return null;
-    return { sheetName, startCol: start.col, startRow: start.row, endCol: end.col, endRow: end.row };
+    const [startRef, endRef] = rangeOnly.split(':')
+    const start = parseCellRef(startRef)
+    const end = parseCellRef(endRef)
+    if (!start || !end) return null
+    return { sheetName, startCol: start.col, startRow: start.row, endCol: end.col, endRow: end.row }
   } else {
-    const cell = parseCellRef(rangeOnly);
-    if (!cell) return null;
-    return { sheetName, startCol: cell.col, startRow: cell.row, endCol: cell.col, endRow: cell.row };
+    const cell = parseCellRef(rangeOnly)
+    if (!cell) return null
+    return { sheetName, startCol: cell.col, startRow: cell.row, endCol: cell.col, endRow: cell.row }
   }
 }
 
@@ -83,7 +83,7 @@ function parseRange(range: string): {
  * Generate cell reference from column and row numbers.
  */
 function cellRef(col: number, row: number): string {
-  return `${columnToLetter(col)}${row}`;
+  return `${columnToLetter(col)}${row}`
 }
 
 /**
@@ -95,22 +95,22 @@ export function cacheFormulas(
   sheetName: string,
   startCol: number,
   startRow: number,
-  formulas: (string | null)[][]
+  formulas: (string | null)[][],
 ): void {
   if (!cellCache.has(spreadsheetId)) {
-    cellCache.set(spreadsheetId, new Map());
+    cellCache.set(spreadsheetId, new Map())
   }
-  const cache = cellCache.get(spreadsheetId)!;
+  const cache = cellCache.get(spreadsheetId)!
 
   for (let rowIdx = 0; rowIdx < formulas.length; rowIdx++) {
-    const row = formulas[rowIdx];
+    const row = formulas[rowIdx]
     for (let colIdx = 0; colIdx < row.length; colIdx++) {
-      const cell = row[colIdx];
-      const ref = `${sheetName}!${cellRef(startCol + colIdx, startRow + rowIdx)}`;
+      const cell = row[colIdx]
+      const ref = `${sheetName}!${cellRef(startCol + colIdx, startRow + rowIdx)}`
       // Store formula if starts with =, otherwise store null (literal value)
       // Cell can be number/boolean/etc from API, so convert to string first
-      const cellStr = cell != null ? String(cell) : null;
-      cache.set(ref, cellStr?.startsWith('=') ? cellStr : null);
+      const cellStr = cell != null ? String(cell) : null
+      cache.set(ref, cellStr?.startsWith('=') ? cellStr : null)
     }
   }
 }
@@ -120,13 +120,16 @@ export function cacheFormulas(
  */
 export function cacheDimensions(
   spreadsheetId: string,
-  sheets: { title: string; rows: number; cols: number }[]
+  sheets: { title: string; rows: number; cols: number }[],
 ): void {
-  dimensionsCache.set(spreadsheetId, sheets.map(s => ({
-    sheetTitle: s.title,
-    rows: s.rows,
-    cols: s.cols,
-  })));
+  dimensionsCache.set(
+    spreadsheetId,
+    sheets.map((s) => ({
+      sheetTitle: s.title,
+      rows: s.rows,
+      cols: s.cols,
+    })),
+  )
 }
 
 /**
@@ -135,13 +138,13 @@ export function cacheDimensions(
  */
 export function cacheSheetNames(
   spreadsheetId: string,
-  sheets: { id: number; title: string }[]
+  sheets: { id: number; title: string }[],
 ): void {
-  const mapping = new Map<number, string>();
+  const mapping = new Map<number, string>()
   for (const sheet of sheets) {
-    mapping.set(sheet.id, sheet.title);
+    mapping.set(sheet.id, sheet.title)
   }
-  sheetIdToNameCache.set(spreadsheetId, mapping);
+  sheetIdToNameCache.set(spreadsheetId, mapping)
 }
 
 /**
@@ -151,16 +154,16 @@ export function cacheSheetNames(
 export function detectSheetRename(
   spreadsheetId: string,
   currentSheetName: string,
-  currentSheetId: number
+  currentSheetId: number,
 ): string | null {
-  const mapping = sheetIdToNameCache.get(spreadsheetId);
-  if (!mapping) return null;
+  const mapping = sheetIdToNameCache.get(spreadsheetId)
+  if (!mapping) return null
 
-  const cachedName = mapping.get(currentSheetId);
+  const cachedName = mapping.get(currentSheetId)
   if (cachedName && cachedName !== currentSheetName) {
-    return cachedName;
+    return cachedName
   }
-  return null;
+  return null
 }
 
 /**
@@ -170,37 +173,37 @@ export function detectSheetRename(
 export function migrateCacheForRename(
   spreadsheetId: string,
   oldSheetName: string,
-  newSheetName: string
+  newSheetName: string,
 ): void {
   // Migrate cell cache entries if present
-  const cache = cellCache.get(spreadsheetId);
+  const cache = cellCache.get(spreadsheetId)
   if (cache) {
     // Find all entries with the old sheet name and migrate them
-    const prefix = `${oldSheetName}!`;
-    const entriesToMigrate: [string, string | null][] = [];
+    const prefix = `${oldSheetName}!`
+    const entriesToMigrate: [string, string | null][] = []
 
     for (const [ref, formula] of cache.entries()) {
       if (ref.startsWith(prefix)) {
-        entriesToMigrate.push([ref, formula]);
+        entriesToMigrate.push([ref, formula])
       }
     }
 
     // Delete old entries and add new ones
     for (const [oldRef, formula] of entriesToMigrate) {
-      cache.delete(oldRef);
-      const cellPart = oldRef.substring(prefix.length);
-      const newRef = `${newSheetName}!${cellPart}`;
-      cache.set(newRef, formula);
+      cache.delete(oldRef)
+      const cellPart = oldRef.substring(prefix.length)
+      const newRef = `${newSheetName}!${cellPart}`
+      cache.set(newRef, formula)
     }
   }
 
   // Update the sheet name mapping
-  const mapping = sheetIdToNameCache.get(spreadsheetId);
+  const mapping = sheetIdToNameCache.get(spreadsheetId)
   if (mapping) {
     for (const [id, name] of mapping.entries()) {
       if (name === oldSheetName) {
-        mapping.set(id, newSheetName);
-        break;
+        mapping.set(id, newSheetName)
+        break
       }
     }
   }
@@ -214,14 +217,14 @@ export function getCachedFormula(
   spreadsheetId: string,
   sheetName: string,
   col: number,
-  row: number
+  row: number,
 ): string | null | undefined {
-  const cache = cellCache.get(spreadsheetId);
-  if (!cache) return undefined;
+  const cache = cellCache.get(spreadsheetId)
+  if (!cache) return undefined
 
-  const ref = `${sheetName}!${cellRef(col, row)}`;
-  if (!cache.has(ref)) return undefined;
-  return cache.get(ref);
+  const ref = `${sheetName}!${cellRef(col, row)}`
+  if (!cache.has(ref)) return undefined
+  return cache.get(ref)
 }
 
 /**
@@ -230,24 +233,24 @@ export function getCachedFormula(
 export function hasReadRange(
   spreadsheetId: string,
   range: string,
-  defaultSheetName?: string
+  defaultSheetName?: string,
 ): boolean {
-  const cache = cellCache.get(spreadsheetId);
-  if (!cache) return false;
+  const cache = cellCache.get(spreadsheetId)
+  if (!cache) return false
 
-  const parsed = parseRange(range);
-  if (!parsed) return false;
+  const parsed = parseRange(range)
+  if (!parsed) return false
 
-  const sheetName = parsed.sheetName || defaultSheetName || 'Sheet1';
+  const sheetName = parsed.sheetName || defaultSheetName || 'Sheet1'
 
   // Check if all cells in range are cached
   for (let row = parsed.startRow; row <= parsed.endRow; row++) {
     for (let col = parsed.startCol; col <= parsed.endCol; col++) {
-      const ref = `${sheetName}!${cellRef(col, row)}`;
-      if (!cache.has(ref)) return false;
+      const ref = `${sheetName}!${cellRef(col, row)}`
+      if (!cache.has(ref)) return false
     }
   }
-  return true;
+  return true
 }
 
 /**
@@ -257,25 +260,25 @@ export function hasReadRange(
 export function getCachedRange(
   spreadsheetId: string,
   range: string,
-  defaultSheetName?: string
+  defaultSheetName?: string,
 ): Map<string, string | null> | undefined {
-  const cache = cellCache.get(spreadsheetId);
-  if (!cache) return undefined;
+  const cache = cellCache.get(spreadsheetId)
+  if (!cache) return undefined
 
-  const parsed = parseRange(range);
-  if (!parsed) return undefined;
+  const parsed = parseRange(range)
+  if (!parsed) return undefined
 
-  const sheetName = parsed.sheetName || defaultSheetName || 'Sheet1';
-  const result = new Map<string, string | null>();
+  const sheetName = parsed.sheetName || defaultSheetName || 'Sheet1'
+  const result = new Map<string, string | null>()
 
   for (let row = parsed.startRow; row <= parsed.endRow; row++) {
     for (let col = parsed.startCol; col <= parsed.endCol; col++) {
-      const ref = `${sheetName}!${cellRef(col, row)}`;
-      if (!cache.has(ref)) return undefined;
-      result.set(ref, cache.get(ref)!);
+      const ref = `${sheetName}!${cellRef(col, row)}`
+      if (!cache.has(ref)) return undefined
+      result.set(ref, cache.get(ref)!)
     }
   }
-  return result;
+  return result
 }
 
 /**
@@ -285,20 +288,20 @@ export function getCachedRange(
 export function invalidateRange(
   spreadsheetId: string,
   range: string,
-  defaultSheetName?: string
+  defaultSheetName?: string,
 ): void {
-  const cache = cellCache.get(spreadsheetId);
-  if (!cache) return;
+  const cache = cellCache.get(spreadsheetId)
+  if (!cache) return
 
-  const parsed = parseRange(range);
-  if (!parsed) return;
+  const parsed = parseRange(range)
+  if (!parsed) return
 
-  const sheetName = parsed.sheetName || defaultSheetName || 'Sheet1';
+  const sheetName = parsed.sheetName || defaultSheetName || 'Sheet1'
 
   for (let row = parsed.startRow; row <= parsed.endRow; row++) {
     for (let col = parsed.startCol; col <= parsed.endCol; col++) {
-      const ref = `${sheetName}!${cellRef(col, row)}`;
-      cache.delete(ref);
+      const ref = `${sheetName}!${cellRef(col, row)}`
+      cache.delete(ref)
     }
   }
 }
@@ -307,9 +310,9 @@ export function invalidateRange(
  * Clear all cached data for a spreadsheet.
  */
 export function clearCache(spreadsheetId: string): void {
-  cellCache.delete(spreadsheetId);
-  dimensionsCache.delete(spreadsheetId);
-  sheetIdToNameCache.delete(spreadsheetId);
+  cellCache.delete(spreadsheetId)
+  dimensionsCache.delete(spreadsheetId)
+  sheetIdToNameCache.delete(spreadsheetId)
 }
 
 /**
@@ -317,10 +320,8 @@ export function clearCache(spreadsheetId: string): void {
  */
 export class NotReadError extends Error {
   constructor(spreadsheetId: string, range: string) {
-    super(
-      `Must read cells before editing. Use gsheet_read first to read the range "${range}".`
-    );
-    this.name = 'NotReadError';
+    super(`Must read cells before editing. Use gsheet_read first to read the range "${range}".`)
+    this.name = 'NotReadError'
   }
 }
 
@@ -329,14 +330,14 @@ export class NotReadError extends Error {
  */
 export class ConcurrentModificationError extends Error {
   constructor(changedCells: string[]) {
-    const cellList = changedCells.slice(0, 5).join(', ');
-    const more = changedCells.length > 5 ? ` and ${changedCells.length - 5} more` : '';
+    const cellList = changedCells.slice(0, 5).join(', ')
+    const more = changedCells.length > 5 ? ` and ${changedCells.length - 5} more` : ''
     super(
       `Cells have been modified since last read: ${cellList}${more}. ` +
-      `Use gsheet_read to get the latest data before editing.`
-    );
-    this.name = 'ConcurrentModificationError';
+        `Use gsheet_read to get the latest data before editing.`,
+    )
+    this.name = 'ConcurrentModificationError'
   }
 }
 
-export { parseRange, cellRef, columnToLetter };
+export { parseRange, cellRef, columnToLetter }
