@@ -160,6 +160,110 @@ describe('Google Docs Client', () => {
       await expect(editDoc('test-doc-id', 'The', 'A')).rejects.toThrow('appears 3 times')
     })
 
+    it('finds and edits text inside a table cell', async () => {
+      const doc = {
+        documentId: 'test-doc-id',
+        title: 'Test Document',
+        revisionId: 'rev-1',
+        body: {
+          content: [
+            {
+              paragraph: {
+                elements: [
+                  {
+                    startIndex: 1,
+                    textRun: { content: 'Before table\n' },
+                  },
+                ],
+              },
+            },
+            {
+              table: {
+                tableRows: [
+                  {
+                    tableCells: [
+                      {
+                        content: [
+                          {
+                            paragraph: {
+                              elements: [
+                                {
+                                  startIndex: 20,
+                                  textRun: { content: 'Header 1\n' },
+                                },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      {
+                        content: [
+                          {
+                            paragraph: {
+                              elements: [
+                                {
+                                  startIndex: 30,
+                                  textRun: { content: 'Header 2\n' },
+                                },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    tableCells: [
+                      {
+                        content: [
+                          {
+                            paragraph: {
+                              elements: [
+                                {
+                                  startIndex: 40,
+                                  textRun: { content: 'Cell A\n' },
+                                },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      {
+                        content: [
+                          {
+                            paragraph: {
+                              elements: [
+                                {
+                                  startIndex: 50,
+                                  textRun: { content: 'Cell B\n' },
+                                },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      }
+
+      mockDocsClient.documents.get.mockResolvedValue({ data: doc })
+      mockDocsClient.documents.batchUpdate.mockResolvedValue({})
+
+      // First read the doc
+      await readDoc('test-doc-id')
+
+      // Now edit text inside a table cell - "Cell A" is unique
+      const result = await editDoc('test-doc-id', 'Cell A', 'Updated Cell A')
+
+      expect(result.success).toBe(true)
+      expect(mockDocsClient.documents.batchUpdate).toHaveBeenCalled()
+    })
+
     it('error message suggests adding more context for ambiguous matches', async () => {
       const doc = createMockDoc('Hello world\nHello there', 'rev-1')
       mockDocsClient.documents.get.mockResolvedValue({ data: doc })

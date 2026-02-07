@@ -10,6 +10,7 @@ export interface TextFormatting {
   bold?: boolean
   italic?: boolean
   strikethrough?: boolean
+  underline?: boolean
   link?: string
 }
 
@@ -97,8 +98,19 @@ export function parseMarkdown(markdown: string): ParsedMarkdown {
       continue
     }
 
+    // Underline: <u>text</u>
+    const underlineMatch = remaining.match(/^<u>([^<]+)<\/u>/)
+    if (underlineMatch) {
+      const [full, text] = underlineMatch
+      segments.push({ text, formatting: { underline: true } })
+      rawText += text
+      remaining = remaining.slice(full.length)
+
+      continue
+    }
+
     // No formatting match - consume plain text until next potential formatting
-    const nextSpecial = remaining.slice(1).search(/[[*_~]/)
+    const nextSpecial = remaining.slice(1).search(/[[*_~<]/)
     if (nextSpecial === -1) {
       // No more special chars, consume rest as plain text
       segments.push({ text: remaining, formatting: {} })
@@ -132,6 +144,7 @@ function formatEqual(a: TextFormatting, b: TextFormatting): boolean {
     a.bold === b.bold &&
     a.italic === b.italic &&
     a.strikethrough === b.strikethrough &&
+    a.underline === b.underline &&
     a.link === b.link
   )
 }
@@ -140,7 +153,7 @@ function formatEqual(a: TextFormatting, b: TextFormatting): boolean {
  * Check if a string contains markdown formatting.
  */
 export function hasMarkdownFormatting(text: string): boolean {
-  return /\[.+\]\(.+\)|\*\*.+\*\*|\*.+\*|~~.+~~/.test(text)
+  return /\[.+\]\(.+\)|\*\*.+\*\*|\*.+\*|~~.+~~|<u>.+<\/u>/.test(text)
 }
 
 /**
@@ -154,7 +167,7 @@ export function buildFormattingRequests(
 ): object[] {
   const requests: object[] = []
 
-  // Always apply text style (bold/italic/strikethrough) to prevent inheriting
+  // Always apply text style (bold/italic/strikethrough/underline) to prevent inheriting
   // adjacent formatting. Set to false if not specified.
   requests.push({
     updateTextStyle: {
@@ -163,8 +176,9 @@ export function buildFormattingRequests(
         bold: formatting.bold || false,
         italic: formatting.italic || false,
         strikethrough: formatting.strikethrough || false,
+        underline: formatting.underline || false,
       },
-      fields: 'bold,italic,strikethrough',
+      fields: 'bold,italic,strikethrough,underline',
     },
   })
 

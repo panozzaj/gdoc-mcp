@@ -61,6 +61,22 @@ describe('parseMarkdown', () => {
     })
   })
 
+  it('parses underline text', () => {
+    const result = parseMarkdown('Hello <u>world</u>')
+    expect(result.rawText).toBe('Hello world')
+    expect(result.segments).toHaveLength(2)
+    expect(result.segments[1]).toEqual({ text: 'world', formatting: { underline: true } })
+  })
+
+  it('parses underline with other formatting', () => {
+    const result = parseMarkdown('**bold** and <u>underline</u>')
+    expect(result.rawText).toBe('bold and underline')
+    expect(result.segments).toHaveLength(3)
+    expect(result.segments[0]).toEqual({ text: 'bold', formatting: { bold: true } })
+    expect(result.segments[1]).toEqual({ text: ' and ', formatting: {} })
+    expect(result.segments[2]).toEqual({ text: 'underline', formatting: { underline: true } })
+  })
+
   it('parses mixed formatting', () => {
     const result = parseMarkdown('Normal **bold** and *italic* text')
     expect(result.rawText).toBe('Normal bold and italic text')
@@ -89,6 +105,10 @@ describe('hasMarkdownFormatting', () => {
 
   it('returns true for strikethrough', () => {
     expect(hasMarkdownFormatting('~~strike~~')).toBe(true)
+  })
+
+  it('returns true for underline', () => {
+    expect(hasMarkdownFormatting('<u>underlined</u>')).toBe(true)
   })
 
   it('returns false for plain text', () => {
@@ -132,13 +152,24 @@ describe('buildFormattingRequests', () => {
     })
   })
 
-  it('still applies text style reset for no formatting (prevents inheritance)', () => {
-    const requests = buildFormattingRequests(10, 20, {})
-    // Should still have one request to explicitly clear bold/italic/strikethrough
+  it('builds underline request', () => {
+    const requests = buildFormattingRequests(10, 20, { underline: true })
     expect(requests).toHaveLength(1)
     expect(requests[0]).toMatchObject({
       updateTextStyle: {
-        textStyle: { bold: false, italic: false, strikethrough: false },
+        range: { startIndex: 10, endIndex: 20 },
+        textStyle: { underline: true },
+      },
+    })
+  })
+
+  it('still applies text style reset for no formatting (prevents inheritance)', () => {
+    const requests = buildFormattingRequests(10, 20, {})
+    // Should still have one request to explicitly clear bold/italic/strikethrough/underline
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      updateTextStyle: {
+        textStyle: { bold: false, italic: false, strikethrough: false, underline: false },
       },
     })
   })

@@ -95,6 +95,10 @@ function convertTextRun(run: TextRun): string {
   if (!style || !text.trim()) return text
 
   // Apply formatting (innermost to outermost)
+  if (style.underline) {
+    text = `<u>${text.trim()}</u>`
+    if (run.content?.endsWith(' ')) text += ' '
+  }
   if (style.strikethrough) {
     text = `~~${text.trim()}~~`
     if (run.content?.endsWith(' ')) text += ' '
@@ -203,18 +207,35 @@ export function findTextRange(
   let fullText = ''
   const indexMap: number[] = [] // maps string position to doc index
 
-  for (const element of body.content) {
+  function appendParagraphText(paragraph: Paragraph): void {
+    for (const elem of paragraph.elements || []) {
+      if (elem.textRun?.content) {
+        const startIdx = elem.startIndex || 0
+        for (let i = 0; i < elem.textRun.content.length; i++) {
+          indexMap.push(startIdx + i)
+        }
+        fullText += elem.textRun.content
+      }
+    }
+  }
+
+  function appendTextFromElement(element: StructuralElement): void {
     if (element.paragraph) {
-      for (const elem of element.paragraph.elements || []) {
-        if (elem.textRun?.content) {
-          const startIdx = elem.startIndex || 0
-          for (let i = 0; i < elem.textRun.content.length; i++) {
-            indexMap.push(startIdx + i)
+      appendParagraphText(element.paragraph)
+    }
+    if (element.table) {
+      for (const row of element.table.tableRows || []) {
+        for (const cell of row.tableCells || []) {
+          for (const cellElement of cell.content || []) {
+            appendTextFromElement(cellElement)
           }
-          fullText += elem.textRun.content
         }
       }
     }
+  }
+
+  for (const element of body.content) {
+    appendTextFromElement(element)
   }
 
   // First try exact match
