@@ -1,16 +1,28 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { getSheetInfo, readSheet, editSheet, appendSheet, addSheet } from './client.js';
-import { clearCache, NotReadError, ConcurrentModificationError } from './concurrency.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import {
+  getSheetInfo,
+  readSheet,
+  editSheet,
+  appendSheet,
+  addSheet,
+  createSheet,
+  copySheet,
+} from './client.js'
+import { clearCache, NotReadError, ConcurrentModificationError } from './concurrency.js'
 
 // Mock the auth module
 vi.mock('../auth.js', () => ({
   getSheetsClient: vi.fn(),
-}));
+  getDriveClient: vi.fn(),
+}))
 
-import { getSheetsClient } from '../auth.js';
+import { getSheetsClient, getDriveClient } from '../auth.js'
 
 // Helper to create mock spreadsheet metadata
-function createMockMeta(title: string = 'Test Spreadsheet', sheets: { title: string; rows?: number; cols?: number }[] = [{ title: 'Sheet1' }]) {
+function createMockMeta(
+  title: string = 'Test Spreadsheet',
+  sheets: { title: string; rows?: number; cols?: number }[] = [{ title: 'Sheet1' }],
+) {
   return {
     properties: { title },
     sheets: sheets.map((s, i) => ({
@@ -23,24 +35,24 @@ function createMockMeta(title: string = 'Test Spreadsheet', sheets: { title: str
         },
       },
     })),
-  };
+  }
 }
 
 describe('Google Sheets Client', () => {
   let mockSheetsClient: {
     spreadsheets: {
-      get: ReturnType<typeof vi.fn>;
-      batchUpdate: ReturnType<typeof vi.fn>;
+      get: ReturnType<typeof vi.fn>
+      batchUpdate: ReturnType<typeof vi.fn>
       values: {
-        get: ReturnType<typeof vi.fn>;
-        update: ReturnType<typeof vi.fn>;
-        append: ReturnType<typeof vi.fn>;
-      };
-    };
-  };
+        get: ReturnType<typeof vi.fn>
+        update: ReturnType<typeof vi.fn>
+        append: ReturnType<typeof vi.fn>
+      }
+    }
+  }
 
   beforeEach(() => {
-    clearCache('test-spreadsheet-id');
+    clearCache('test-spreadsheet-id')
 
     mockSheetsClient = {
       spreadsheets: {
@@ -52,10 +64,10 @@ describe('Google Sheets Client', () => {
           append: vi.fn(),
         },
       },
-    };
+    }
 
-    vi.mocked(getSheetsClient).mockResolvedValue(mockSheetsClient as any);
-  });
+    vi.mocked(getSheetsClient).mockResolvedValue(mockSheetsClient as any)
+  })
 
   describe('getSheetInfo', () => {
     it('returns spreadsheet metadata', async () => {
@@ -64,290 +76,307 @@ describe('Google Sheets Client', () => {
           { title: 'Sheet1', rows: 100, cols: 10 },
           { title: 'Sheet2', rows: 50, cols: 5 },
         ]),
-      });
+      })
 
-      const result = await getSheetInfo('test-spreadsheet-id');
+      const result = await getSheetInfo('test-spreadsheet-id')
 
-      expect(result.id).toBe('test-spreadsheet-id');
-      expect(result.title).toBe('My Spreadsheet');
-      expect(result.sheets).toHaveLength(2);
+      expect(result.id).toBe('test-spreadsheet-id')
+      expect(result.title).toBe('My Spreadsheet')
+      expect(result.sheets).toHaveLength(2)
       expect(result.sheets[0]).toEqual({
         id: 0,
         title: 'Sheet1',
         rowCount: 100,
         columnCount: 10,
-      });
-    });
+      })
+    })
 
     it('extracts ID from full URL', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
 
-      await getSheetInfo('https://docs.google.com/spreadsheets/d/abc123xyz/edit#gid=0');
+      await getSheetInfo('https://docs.google.com/spreadsheets/d/abc123xyz/edit#gid=0')
 
       expect(mockSheetsClient.spreadsheets.get).toHaveBeenCalledWith(
-        expect.objectContaining({ spreadsheetId: 'abc123xyz' })
-      );
-    });
-  });
+        expect.objectContaining({ spreadsheetId: 'abc123xyz' }),
+      )
+    })
+  })
 
   describe('readSheet', () => {
     it('returns sheet content as markdown table', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       mockSheetsClient.spreadsheets.values.get
         .mockResolvedValueOnce({
-          data: { values: [['Name', 'Age'], ['Alice', '30'], ['Bob', '25']] },
+          data: {
+            values: [
+              ['Name', 'Age'],
+              ['Alice', '30'],
+              ['Bob', '25'],
+            ],
+          },
         })
         .mockResolvedValueOnce({
-          data: { values: [['Name', 'Age'], ['Alice', '30'], ['Bob', '25']] },
-        });
+          data: {
+            values: [
+              ['Name', 'Age'],
+              ['Alice', '30'],
+              ['Bob', '25'],
+            ],
+          },
+        })
 
-      const result = await readSheet('test-spreadsheet-id');
+      const result = await readSheet('test-spreadsheet-id')
 
-      expect(result.content).toContain('| Name | Age |');
-      expect(result.content).toContain('| --- | --- |');
-      expect(result.content).toContain('| Alice | 30 |');
-      expect(result.content).toContain('| Bob | 25 |');
-    });
+      expect(result.content).toContain('| Name | Age |')
+      expect(result.content).toContain('| --- | --- |')
+      expect(result.content).toContain('| Alice | 30 |')
+      expect(result.content).toContain('| Bob | 25 |')
+    })
 
     it('handles empty sheet', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [] },
-      });
+      })
 
-      const result = await readSheet('test-spreadsheet-id');
+      const result = await readSheet('test-spreadsheet-id')
 
-      expect(result.content).toBe('(empty sheet)');
-    });
+      expect(result.content).toBe('(empty sheet)')
+    })
 
     it('reads specific sheet by name', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta('Test', [{ title: 'Sheet1' }, { title: 'Data' }]),
-      });
+      })
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [['A', 'B']] },
-      });
+      })
 
-      await readSheet('test-spreadsheet-id', 'Data');
+      await readSheet('test-spreadsheet-id', 'Data')
 
       expect(mockSheetsClient.spreadsheets.values.get).toHaveBeenCalledWith(
-        expect.objectContaining({ range: 'Data' })
-      );
-    });
+        expect.objectContaining({ range: 'Data' }),
+      )
+    })
 
     it('throws error for non-existent sheet', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta('Test', [{ title: 'Sheet1' }]),
-      });
+      })
 
       await expect(readSheet('test-spreadsheet-id', 'NonExistent')).rejects.toThrow(
-        'Sheet "NonExistent" not found'
-      );
-    });
+        'Sheet "NonExistent" not found',
+      )
+    })
 
     it('reads specific range', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [['A1', 'B1']] },
-      });
+      })
 
-      await readSheet('test-spreadsheet-id', undefined, 'A1:B1');
+      await readSheet('test-spreadsheet-id', undefined, 'A1:B1')
 
       expect(mockSheetsClient.spreadsheets.values.get).toHaveBeenCalledWith(
-        expect.objectContaining({ range: 'Sheet1!A1:B1' })
-      );
-    });
+        expect.objectContaining({ range: 'Sheet1!A1:B1' }),
+      )
+    })
 
     it('throws error when range exceeds sheet row bounds', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta('Test', [{ title: 'Sheet1', rows: 10, cols: 5 }]),
-      });
+      })
 
-      await expect(
-        readSheet('test-spreadsheet-id', undefined, 'A1:A20')
-      ).rejects.toThrow('Range exceeds sheet bounds: requested row 20 but sheet "Sheet1" only has 10 rows');
-    });
+      await expect(readSheet('test-spreadsheet-id', undefined, 'A1:A20')).rejects.toThrow(
+        'Range exceeds sheet bounds: requested row 20 but sheet "Sheet1" only has 10 rows',
+      )
+    })
 
     it('throws error when range exceeds sheet column bounds', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta('Test', [{ title: 'Sheet1', rows: 100, cols: 3 }]),
-      });
+      })
 
-      await expect(
-        readSheet('test-spreadsheet-id', undefined, 'A1:E1')
-      ).rejects.toThrow('Range exceeds sheet bounds: requested column 5 but sheet "Sheet1" only has 3 columns');
-    });
+      await expect(readSheet('test-spreadsheet-id', undefined, 'A1:E1')).rejects.toThrow(
+        'Range exceeds sheet bounds: requested column 5 but sheet "Sheet1" only has 3 columns',
+      )
+    })
 
     it('pads empty trailing rows and columns to match requested range', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta('Test', [{ title: 'Sheet1', rows: 100, cols: 26 }]),
-      });
+      })
       // Google Sheets API truncates trailing empty rows/cols
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [['A1', 'B1']] }, // Only 1 row, 2 cols returned
-      });
+      })
 
-      const result = await readSheet('test-spreadsheet-id', undefined, 'A1:C3');
+      const result = await readSheet('test-spreadsheet-id', undefined, 'A1:C3')
 
       // Should be padded to 3 rows × 3 cols
-      expect(result.rowCount).toBe(3);
-      expect(result.columnCount).toBe(3);
-      expect(result.content).toContain('| A1 | B1 |  |'); // First row with padding
-      expect(result.content).toContain('|  |  |  |'); // Empty rows
-    });
+      expect(result.rowCount).toBe(3)
+      expect(result.columnCount).toBe(3)
+      expect(result.content).toContain('| A1 | B1 |  |') // First row with padding
+      expect(result.content).toContain('|  |  |  |') // Empty rows
+    })
 
     it('does not double-prefix range that already contains sheet name', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta('Test', [{ title: 'Data' }, { title: '2025' }]),
-      });
+      })
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [['A1']] },
-      });
+      })
 
       // Range already has sheet prefix - should not become "Data!2025!A1:E20"
-      await readSheet('test-spreadsheet-id', undefined, '2025!A1:E20');
+      await readSheet('test-spreadsheet-id', undefined, '2025!A1:E20')
 
       expect(mockSheetsClient.spreadsheets.values.get).toHaveBeenCalledWith(
-        expect.objectContaining({ range: '2025!A1:E20' })
-      );
-    });
+        expect.objectContaining({ range: '2025!A1:E20' }),
+      )
+    })
 
     it('caches formulas for concurrency control', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       // readSheet calls values.get twice, editSheet calls once more
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [['=A2+B2']] },
-      });
+      })
 
       // Read specific range so caching works properly
-      await readSheet('test-spreadsheet-id', undefined, 'A1');
+      await readSheet('test-spreadsheet-id', undefined, 'A1')
 
       // Now editing should work (cells are cached)
       mockSheetsClient.spreadsheets.values.update.mockResolvedValue({
         data: { updatedCells: 1 },
-      });
+      })
 
-      const result = await editSheet('test-spreadsheet-id', 'A1', [['300']]);
-      expect(result.success).toBe(true);
-    });
-  });
+      const result = await editSheet('test-spreadsheet-id', 'A1', [['300']])
+      expect(result.success).toBe(true)
+    })
+  })
 
   describe('editSheet', () => {
     it('fails with NotReadError when cells not read first', async () => {
       // editSheet needs metadata to get default sheet name
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
 
-      await expect(
-        editSheet('test-spreadsheet-id', 'A1', [['new value']])
-      ).rejects.toThrow(NotReadError);
-    });
+      await expect(editSheet('test-spreadsheet-id', 'A1', [['new value']])).rejects.toThrow(
+        NotReadError,
+      )
+    })
 
     it('succeeds after reading cells', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [['old value']] },
-      });
+      })
 
       // Read specific range before editing
-      await readSheet('test-spreadsheet-id', undefined, 'A1');
+      await readSheet('test-spreadsheet-id', undefined, 'A1')
 
       mockSheetsClient.spreadsheets.values.update.mockResolvedValue({
         data: { updatedCells: 1 },
-      });
+      })
 
-      const result = await editSheet('test-spreadsheet-id', 'A1', [['new value']]);
+      const result = await editSheet('test-spreadsheet-id', 'A1', [['new value']])
 
-      expect(result.success).toBe(true);
-      expect(result.updatedCells).toBe(1);
-    });
+      expect(result.success).toBe(true)
+      expect(result.updatedCells).toBe(1)
+    })
 
     it('detects concurrent formula changes', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       // readSheet: formatted values, then formulas
       mockSheetsClient.spreadsheets.values.get
         .mockResolvedValueOnce({ data: { values: [['100']] } })
-        .mockResolvedValueOnce({ data: { values: [['=A2+B2']] } });
+        .mockResolvedValueOnce({ data: { values: [['=A2+B2']] } })
 
-      await readSheet('test-spreadsheet-id', undefined, 'A1');
+      await readSheet('test-spreadsheet-id', undefined, 'A1')
 
       // editSheet checks current formulas - someone changed it
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [['=A2*B2']] }, // different formula!
-      });
+      })
 
-      await expect(
-        editSheet('test-spreadsheet-id', 'A1', [['999']])
-      ).rejects.toThrow(ConcurrentModificationError);
-    });
+      await expect(editSheet('test-spreadsheet-id', 'A1', [['999']])).rejects.toThrow(
+        ConcurrentModificationError,
+      )
+    })
 
     it('allows edit when only computed values changed (formula same)', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       mockSheetsClient.spreadsheets.values.get
         .mockResolvedValueOnce({ data: { values: [['100']] } })
-        .mockResolvedValueOnce({ data: { values: [['=A2+B2']] } });
+        .mockResolvedValueOnce({ data: { values: [['=A2+B2']] } })
 
-      await readSheet('test-spreadsheet-id', undefined, 'A1');
+      await readSheet('test-spreadsheet-id', undefined, 'A1')
 
       // editSheet: same formula (computed value may differ, that's ok)
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
         data: { values: [['=A2+B2']] },
-      });
+      })
       mockSheetsClient.spreadsheets.values.update.mockResolvedValue({
         data: { updatedCells: 1 },
-      });
+      })
 
-      const result = await editSheet('test-spreadsheet-id', 'A1', [['new']]);
-      expect(result.success).toBe(true);
-    });
+      const result = await editSheet('test-spreadsheet-id', 'A1', [['new']])
+      expect(result.success).toBe(true)
+    })
 
     it('updates multiple cells', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       mockSheetsClient.spreadsheets.values.get.mockResolvedValue({
-        data: { values: [['a', 'b'], ['c', 'd']] },
-      });
+        data: {
+          values: [
+            ['a', 'b'],
+            ['c', 'd'],
+          ],
+        },
+      })
 
       // Read the exact range we'll edit
-      await readSheet('test-spreadsheet-id', undefined, 'A1:B2');
+      await readSheet('test-spreadsheet-id', undefined, 'A1:B2')
 
       mockSheetsClient.spreadsheets.values.update.mockResolvedValue({
         data: { updatedCells: 4 },
-      });
+      })
 
       const result = await editSheet('test-spreadsheet-id', 'A1:B2', [
         ['1', '2'],
         ['3', '4'],
-      ]);
+      ])
 
-      expect(result.success).toBe(true);
-      expect(result.message).toContain('4 cells');
-    });
-  });
+      expect(result.success).toBe(true)
+      expect(result.message).toContain('4 cells')
+    })
+  })
 
   describe('appendSheet', () => {
     it('appends rows to sheet', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta(),
-      });
+      })
       mockSheetsClient.spreadsheets.values.append.mockResolvedValue({
         data: {
           updates: {
@@ -355,45 +384,45 @@ describe('Google Sheets Client', () => {
             updatedRows: 2,
           },
         },
-      });
+      })
 
       const result = await appendSheet('test-spreadsheet-id', [
         ['new row 1 col A', 'new row 1 col B'],
         ['new row 2 col A', 'new row 2 col B'],
-      ]);
+      ])
 
-      expect(result.success).toBe(true);
-      expect(result.message).toContain('2 rows');
-      expect(result.updatedRange).toBe('Sheet1!A5:B6');
-    });
+      expect(result.success).toBe(true)
+      expect(result.message).toContain('2 rows')
+      expect(result.updatedRange).toBe('Sheet1!A5:B6')
+    })
 
     it('appends to specific sheet', async () => {
       mockSheetsClient.spreadsheets.values.append.mockResolvedValue({
         data: { updates: { updatedRange: 'Data!A10', updatedRows: 1 } },
-      });
+      })
 
-      await appendSheet('test-spreadsheet-id', [['value']], 'Data');
+      await appendSheet('test-spreadsheet-id', [['value']], 'Data')
 
       expect(mockSheetsClient.spreadsheets.values.append).toHaveBeenCalledWith(
-        expect.objectContaining({ range: 'Data' })
-      );
-    });
+        expect.objectContaining({ range: 'Data' }),
+      )
+    })
 
     it('uses first sheet when no sheet specified', async () => {
       mockSheetsClient.spreadsheets.get.mockResolvedValue({
         data: createMockMeta('Test', [{ title: 'FirstSheet' }]),
-      });
+      })
       mockSheetsClient.spreadsheets.values.append.mockResolvedValue({
         data: { updates: { updatedRange: 'FirstSheet!A1', updatedRows: 1 } },
-      });
+      })
 
-      await appendSheet('test-spreadsheet-id', [['value']]);
+      await appendSheet('test-spreadsheet-id', [['value']])
 
       expect(mockSheetsClient.spreadsheets.values.append).toHaveBeenCalledWith(
-        expect.objectContaining({ range: 'FirstSheet' })
-      );
-    });
-  });
+        expect.objectContaining({ range: 'FirstSheet' }),
+      )
+    })
+  })
 
   describe('addSheet', () => {
     it('adds a new sheet to the spreadsheet', async () => {
@@ -410,13 +439,13 @@ describe('Google Sheets Client', () => {
             },
           ],
         },
-      });
+      })
 
-      const result = await addSheet('test-spreadsheet-id', 'NewSheet');
+      const result = await addSheet('test-spreadsheet-id', 'NewSheet')
 
-      expect(result.success).toBe(true);
-      expect(result.sheetId).toBe(123);
-      expect(result.message).toContain('NewSheet');
+      expect(result.success).toBe(true)
+      expect(result.sheetId).toBe(123)
+      expect(result.message).toContain('NewSheet')
       expect(mockSheetsClient.spreadsheets.batchUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
           spreadsheetId: 'test-spreadsheet-id',
@@ -431,22 +460,183 @@ describe('Google Sheets Client', () => {
               },
             ],
           },
-        })
-      );
-    });
+        }),
+      )
+    })
 
     it('extracts spreadsheet ID from URL', async () => {
       mockSheetsClient.spreadsheets.batchUpdate.mockResolvedValue({
         data: {
           replies: [{ addSheet: { properties: { sheetId: 456, title: 'Test' } } }],
         },
-      });
+      })
 
-      await addSheet('https://docs.google.com/spreadsheets/d/abc123xyz/edit', 'Test');
+      await addSheet('https://docs.google.com/spreadsheets/d/abc123xyz/edit', 'Test')
 
       expect(mockSheetsClient.spreadsheets.batchUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ spreadsheetId: 'abc123xyz' })
-      );
-    });
-  });
-});
+        expect.objectContaining({ spreadsheetId: 'abc123xyz' }),
+      )
+    })
+  })
+
+  describe('createSheet', () => {
+    let mockDriveClient: {
+      files: {
+        create: ReturnType<typeof vi.fn>
+        copy: ReturnType<typeof vi.fn>
+      }
+    }
+
+    beforeEach(() => {
+      mockDriveClient = {
+        files: {
+          create: vi.fn(),
+          copy: vi.fn(),
+        },
+      }
+      vi.mocked(getDriveClient).mockResolvedValue(mockDriveClient as any)
+    })
+
+    it('creates a new spreadsheet with title', async () => {
+      mockDriveClient.files.create.mockResolvedValue({
+        data: { id: 'new-sheet-id', name: 'My Spreadsheet' },
+      })
+
+      const result = await createSheet('My Spreadsheet')
+
+      expect(result.id).toBe('new-sheet-id')
+      expect(result.title).toBe('My Spreadsheet')
+      expect(result.url).toBe('https://docs.google.com/spreadsheets/d/new-sheet-id/edit')
+      expect(mockDriveClient.files.create).toHaveBeenCalledWith({
+        requestBody: {
+          name: 'My Spreadsheet',
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+        },
+        fields: 'id, name',
+      })
+    })
+
+    it('creates a spreadsheet in a specific folder', async () => {
+      mockDriveClient.files.create.mockResolvedValue({
+        data: { id: 'new-sheet-id', name: 'My Sheet' },
+      })
+
+      await createSheet('My Sheet', 'folder-123')
+
+      expect(mockDriveClient.files.create).toHaveBeenCalledWith({
+        requestBody: {
+          name: 'My Sheet',
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+          parents: ['folder-123'],
+        },
+        fields: 'id, name',
+      })
+    })
+
+    it('extracts folder ID from URL', async () => {
+      mockDriveClient.files.create.mockResolvedValue({
+        data: { id: 'new-sheet-id', name: 'My Sheet' },
+      })
+
+      await createSheet('My Sheet', 'https://drive.google.com/drive/folders/folder-abc')
+
+      expect(mockDriveClient.files.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({
+            parents: ['folder-abc'],
+          }),
+        }),
+      )
+    })
+  })
+
+  describe('copySheet', () => {
+    let mockDriveClient: {
+      files: {
+        create: ReturnType<typeof vi.fn>
+        copy: ReturnType<typeof vi.fn>
+      }
+    }
+
+    beforeEach(() => {
+      mockDriveClient = {
+        files: {
+          create: vi.fn(),
+          copy: vi.fn(),
+        },
+      }
+      vi.mocked(getDriveClient).mockResolvedValue(mockDriveClient as any)
+    })
+
+    it('copies a spreadsheet', async () => {
+      mockDriveClient.files.copy.mockResolvedValue({
+        data: { id: 'copy-sheet-id', name: 'Copy of Original' },
+      })
+
+      const result = await copySheet('source-sheet-id')
+
+      expect(result.id).toBe('copy-sheet-id')
+      expect(result.title).toBe('Copy of Original')
+      expect(result.url).toBe('https://docs.google.com/spreadsheets/d/copy-sheet-id/edit')
+      expect(mockDriveClient.files.copy).toHaveBeenCalledWith({
+        fileId: 'source-sheet-id',
+        requestBody: {},
+        fields: 'id, name',
+      })
+    })
+
+    it('copies with a custom title', async () => {
+      mockDriveClient.files.copy.mockResolvedValue({
+        data: { id: 'copy-sheet-id', name: 'Custom Title' },
+      })
+
+      await copySheet('source-sheet-id', 'Custom Title')
+
+      expect(mockDriveClient.files.copy).toHaveBeenCalledWith({
+        fileId: 'source-sheet-id',
+        requestBody: { name: 'Custom Title' },
+        fields: 'id, name',
+      })
+    })
+
+    it('copies to a specific folder', async () => {
+      mockDriveClient.files.copy.mockResolvedValue({
+        data: { id: 'copy-sheet-id', name: 'Copy' },
+      })
+
+      await copySheet('source-sheet-id', undefined, 'folder-456')
+
+      expect(mockDriveClient.files.copy).toHaveBeenCalledWith({
+        fileId: 'source-sheet-id',
+        requestBody: { parents: ['folder-456'] },
+        fields: 'id, name',
+      })
+    })
+
+    it('copies with custom title and folder', async () => {
+      mockDriveClient.files.copy.mockResolvedValue({
+        data: { id: 'copy-sheet-id', name: 'My Copy' },
+      })
+
+      await copySheet('source-sheet-id', 'My Copy', 'folder-789')
+
+      expect(mockDriveClient.files.copy).toHaveBeenCalledWith({
+        fileId: 'source-sheet-id',
+        requestBody: { name: 'My Copy', parents: ['folder-789'] },
+        fields: 'id, name',
+      })
+    })
+
+    it('extracts spreadsheet ID from URL', async () => {
+      mockDriveClient.files.copy.mockResolvedValue({
+        data: { id: 'copy-id', name: 'Copy' },
+      })
+
+      await copySheet('https://docs.google.com/spreadsheets/d/source123/edit')
+
+      expect(mockDriveClient.files.copy).toHaveBeenCalledWith(
+        expect.objectContaining({ fileId: 'source123' }),
+      )
+    })
+  })
+})

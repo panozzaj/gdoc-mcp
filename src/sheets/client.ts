@@ -1,4 +1,5 @@
-import { getSheetsClient } from '../auth.js';
+import { getSheetsClient, getDriveClient } from '../auth.js'
+import { extractFolderId } from '../types.js'
 import {
   cacheFormulas,
   cacheDimensions,
@@ -11,111 +12,109 @@ import {
   parseRange,
   NotReadError,
   ConcurrentModificationError,
-} from './concurrency.js';
+} from './concurrency.js'
 
 // Extract spreadsheet ID from URL or return as-is if already an ID
 function extractSpreadsheetId(idOrUrl: string): string {
   // Handle full URLs like https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit
-  const urlMatch = idOrUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const urlMatch = idOrUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
   if (urlMatch) {
-    return urlMatch[1];
+    return urlMatch[1]
   }
   // Assume it's already an ID
-  return idOrUrl;
+  return idOrUrl
 }
 
 export interface SheetInfo {
-  id: string;
-  title: string;
-  sheets: { id: number; title: string; rowCount: number; columnCount: number }[];
+  id: string
+  title: string
+  sheets: { id: number; title: string; rowCount: number; columnCount: number }[]
 }
 
 export interface SheetContent {
-  id: string;
-  title: string;
-  sheetTitle: string;
-  content: string;
-  rowCount: number;
-  columnCount: number;
+  id: string
+  title: string
+  sheetTitle: string
+  content: string
+  rowCount: number
+  columnCount: number
 }
 
 export async function getSheetInfo(spreadsheetIdOrUrl: string): Promise<SheetInfo> {
-  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl);
-  const sheets = await getSheetsClient();
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
+  const sheets = await getSheetsClient()
 
   const response = await sheets.spreadsheets.get({
     spreadsheetId,
     fields: 'properties.title,sheets.properties',
-  });
+  })
 
-  const data = response.data;
+  const data = response.data
   return {
     id: spreadsheetId,
     title: data.properties?.title || 'Untitled',
-    sheets: (data.sheets || []).map(s => ({
+    sheets: (data.sheets || []).map((s) => ({
       id: s.properties?.sheetId || 0,
       title: s.properties?.title || 'Sheet',
       rowCount: s.properties?.gridProperties?.rowCount || 0,
       columnCount: s.properties?.gridProperties?.columnCount || 0,
     })),
-  };
+  }
 }
 
 export async function readSheet(
   spreadsheetIdOrUrl: string,
   sheetName?: string,
-  range?: string
+  range?: string,
 ): Promise<SheetContent> {
-  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl);
-  const sheets = await getSheetsClient();
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
+  const sheets = await getSheetsClient()
 
   // Get spreadsheet metadata first
   const metaResponse = await sheets.spreadsheets.get({
     spreadsheetId,
     fields: 'properties.title,sheets.properties',
-  });
+  })
 
-  const spreadsheetTitle = metaResponse.data.properties?.title || 'Untitled';
-  const sheetsList = metaResponse.data.sheets || [];
+  const spreadsheetTitle = metaResponse.data.properties?.title || 'Untitled'
+  const sheetsList = metaResponse.data.sheets || []
 
   // Determine which sheet to read
-  let targetSheet = sheetsList[0];
+  let targetSheet = sheetsList[0]
   if (sheetName) {
-    const found = sheetsList.find(s => s.properties?.title === sheetName);
+    const found = sheetsList.find((s) => s.properties?.title === sheetName)
     if (!found) {
-      const available = sheetsList.map(s => s.properties?.title).join(', ');
-      throw new Error(`Sheet "${sheetName}" not found. Available: ${available}`);
+      const available = sheetsList.map((s) => s.properties?.title).join(', ')
+      throw new Error(`Sheet "${sheetName}" not found. Available: ${available}`)
     }
-    targetSheet = found;
+    targetSheet = found
   }
 
-  const sheetTitle = targetSheet.properties?.title || 'Sheet1';
-  const sheetRowCount = targetSheet.properties?.gridProperties?.rowCount || 1000;
-  const sheetColCount = targetSheet.properties?.gridProperties?.columnCount || 26;
+  const sheetTitle = targetSheet.properties?.title || 'Sheet1'
+  const sheetRowCount = targetSheet.properties?.gridProperties?.rowCount || 1000
+  const sheetColCount = targetSheet.properties?.gridProperties?.columnCount || 26
 
   // Don't prefix if range already includes sheet name (has !)
-  const readRange = range
-    ? range.includes('!') ? range : `${sheetTitle}!${range}`
-    : sheetTitle;
+  const readRange = range ? (range.includes('!') ? range : `${sheetTitle}!${range}`) : sheetTitle
 
   // Parse range to check bounds (only when explicit range provided)
-  const parsed = range ? parseRange(readRange) : null;
-  const startCol = parsed?.startCol || 1;
-  const startRow = parsed?.startRow || 1;
-  const endCol = parsed?.endCol || sheetColCount;
-  const endRow = parsed?.endRow || sheetRowCount;
+  const parsed = range ? parseRange(readRange) : null
+  const startCol = parsed?.startCol || 1
+  const startRow = parsed?.startRow || 1
+  const endCol = parsed?.endCol || sheetColCount
+  const endRow = parsed?.endRow || sheetRowCount
 
   // Check if requested range exceeds sheet dimensions (only for explicit ranges)
   if (parsed) {
     if (parsed.endRow > sheetRowCount) {
       throw new Error(
-        `Range exceeds sheet bounds: requested row ${parsed.endRow} but sheet "${sheetTitle}" only has ${sheetRowCount} rows.`
-      );
+        `Range exceeds sheet bounds: requested row ${parsed.endRow} but sheet "${sheetTitle}" only has ${sheetRowCount} rows.`,
+      )
     }
     if (parsed.endCol > sheetColCount) {
       throw new Error(
-        `Range exceeds sheet bounds: requested column ${parsed.endCol} but sheet "${sheetTitle}" only has ${sheetColCount} columns.`
-      );
+        `Range exceeds sheet bounds: requested column ${parsed.endCol} but sheet "${sheetTitle}" only has ${sheetColCount} columns.`,
+      )
     }
   }
 
@@ -131,86 +130,86 @@ export async function readSheet(
       range: readRange,
       valueRenderOption: 'FORMULA',
     }),
-  ]);
+  ])
 
-  const rows = valuesResponse.data.values || [];
-  const formulas = formulasResponse.data.values || [];
+  const rows = valuesResponse.data.values || []
+  const formulas = formulasResponse.data.values || []
 
   // Pad data to match requested range dimensions (only when explicit range provided)
   // Google Sheets API truncates trailing empty rows/cols, so we pad them back
-  let paddedFormulas: (string | null)[][];
-  let paddedRows: string[][];
+  let paddedFormulas: (string | null)[][]
+  let paddedRows: string[][]
 
   if (range && parsed) {
     // Explicit range: pad to requested dimensions
-    const requestedRows = endRow - startRow + 1;
-    const requestedCols = endCol - startCol + 1;
+    const requestedRows = endRow - startRow + 1
+    const requestedCols = endCol - startCol + 1
 
-    paddedFormulas = [];
+    paddedFormulas = []
     for (let r = 0; r < requestedRows; r++) {
-      const sourceRow = formulas[r] || [];
-      const paddedRow: (string | null)[] = [];
+      const sourceRow = formulas[r] || []
+      const paddedRow: (string | null)[] = []
       for (let c = 0; c < requestedCols; c++) {
-        paddedRow.push(sourceRow[c] ?? null);
+        paddedRow.push(sourceRow[c] ?? null)
       }
-      paddedFormulas.push(paddedRow);
+      paddedFormulas.push(paddedRow)
     }
 
-    paddedRows = [];
+    paddedRows = []
     for (let r = 0; r < requestedRows; r++) {
-      const sourceRow = rows[r] || [];
-      const paddedRow: string[] = [];
+      const sourceRow = rows[r] || []
+      const paddedRow: string[] = []
       for (let c = 0; c < requestedCols; c++) {
-        paddedRow.push(sourceRow[c] != null ? String(sourceRow[c]) : '');
+        paddedRow.push(sourceRow[c] != null ? String(sourceRow[c]) : '')
       }
-      paddedRows.push(paddedRow);
+      paddedRows.push(paddedRow)
     }
   } else {
     // No explicit range: use actual data as-is
-    paddedFormulas = formulas.map(row => row.map(cell => cell ?? null));
-    paddedRows = rows.map(row => row.map(cell => cell != null ? String(cell) : ''));
+    paddedFormulas = formulas.map((row) => row.map((cell) => cell ?? null))
+    paddedRows = rows.map((row) => row.map((cell) => (cell != null ? String(cell) : '')))
   }
 
   // Cache formulas for concurrency control
-  cacheFormulas(spreadsheetId, sheetTitle, startCol, startRow, paddedFormulas);
+  cacheFormulas(spreadsheetId, sheetTitle, startCol, startRow, paddedFormulas)
 
   // Cache sheet dimensions
   cacheDimensions(
     spreadsheetId,
-    sheetsList.map(s => ({
+    sheetsList.map((s) => ({
       title: s.properties?.title || 'Sheet',
       rows: s.properties?.gridProperties?.rowCount || 0,
       cols: s.properties?.gridProperties?.columnCount || 0,
-    }))
-  );
+    })),
+  )
 
   // Cache sheet ID to name mapping for rename detection
   cacheSheetNames(
     spreadsheetId,
-    sheetsList.map(s => ({
+    sheetsList.map((s) => ({
       id: s.properties?.sheetId || 0,
       title: s.properties?.title || 'Sheet',
-    }))
-  );
+    })),
+  )
 
   // Convert to markdown table (use paddedRows for consistency with cache)
-  let content: string;
+  let content: string
   if (paddedRows.length === 0) {
-    content = '(empty sheet)';
+    content = '(empty sheet)'
   } else {
-    const lines: string[] = [];
+    const lines: string[] = []
 
     for (let i = 0; i < paddedRows.length; i++) {
-      const row = paddedRows[i];
-      lines.push(`| ${row.join(' | ')} |`);
+      const row = paddedRows[i]
+      lines.push(`| ${row.join(' | ')} |`)
 
       // Add header separator after first row
       if (i === 0) {
-        lines.push(`| ${row.map(() => '---').join(' | ')} |`);
+        lines.push(`| ${row.map(() => '---').join(' | ')} |`)
       }
     }
 
-    content = lines.join('\n');
+    content = lines.join('\n')
   }
 
   return {
@@ -220,38 +219,38 @@ export async function readSheet(
     content,
     rowCount: paddedRows.length,
     columnCount: paddedRows.length > 0 ? paddedRows[0].length : 0,
-  };
+  }
 }
 
 export async function editSheet(
   spreadsheetIdOrUrl: string,
   range: string,
   values: string[][],
-  sheetName?: string
+  sheetName?: string,
 ): Promise<{ success: boolean; message: string; updatedCells: number }> {
-  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl);
-  const sheets = await getSheetsClient();
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
+  const sheets = await getSheetsClient()
 
   // Get current sheet metadata
   const meta = await sheets.spreadsheets.get({
     spreadsheetId,
     fields: 'sheets.properties',
-  });
-  const sheetsList = meta.data.sheets || [];
+  })
+  const sheetsList = meta.data.sheets || []
 
   // Detect if any sheets were renamed and migrate cache entries
   // Also track if the user passed an old sheet name
-  let resolvedSheetName = sheetName;
+  let resolvedSheetName = sheetName
   for (const sheet of sheetsList) {
-    const currentName = sheet.properties?.title;
-    const sheetId = sheet.properties?.sheetId;
+    const currentName = sheet.properties?.title
+    const sheetId = sheet.properties?.sheetId
     if (currentName && sheetId != null) {
-      const oldName = detectSheetRename(spreadsheetId, currentName, sheetId);
+      const oldName = detectSheetRename(spreadsheetId, currentName, sheetId)
       if (oldName) {
-        migrateCacheForRename(spreadsheetId, oldName, currentName);
+        migrateCacheForRename(spreadsheetId, oldName, currentName)
         // If user passed the old sheet name, use the new name instead
         if (sheetName === oldName) {
-          resolvedSheetName = currentName;
+          resolvedSheetName = currentName
         }
       }
     }
@@ -260,30 +259,30 @@ export async function editSheet(
   // Update sheet name cache with current names
   cacheSheetNames(
     spreadsheetId,
-    sheetsList.map(s => ({
+    sheetsList.map((s) => ({
       id: s.properties?.sheetId || 0,
       title: s.properties?.title || 'Sheet',
-    }))
-  );
+    })),
+  )
 
   // Determine default sheet name if not provided
-  let defaultSheetName = resolvedSheetName;
+  let defaultSheetName = resolvedSheetName
   if (!defaultSheetName && !range.includes('!')) {
-    defaultSheetName = sheetsList[0]?.properties?.title || 'Sheet1';
+    defaultSheetName = sheetsList[0]?.properties?.title || 'Sheet1'
   }
 
   // Build full range with resolved sheet name
-  const fullRange = resolvedSheetName ? `${resolvedSheetName}!${range}` : range;
+  const fullRange = resolvedSheetName ? `${resolvedSheetName}!${range}` : range
 
   // Check if cells were read first
   if (!hasReadRange(spreadsheetId, fullRange, defaultSheetName)) {
-    throw new NotReadError(spreadsheetId, fullRange);
+    throw new NotReadError(spreadsheetId, fullRange)
   }
 
   // Get cached formulas for comparison
-  const cachedFormulas = getCachedRange(spreadsheetId, fullRange, defaultSheetName);
+  const cachedFormulas = getCachedRange(spreadsheetId, fullRange, defaultSheetName)
   if (!cachedFormulas) {
-    throw new NotReadError(spreadsheetId, fullRange);
+    throw new NotReadError(spreadsheetId, fullRange)
   }
 
   // Fetch current formulas to check for concurrent modifications
@@ -291,35 +290,35 @@ export async function editSheet(
     spreadsheetId,
     range: fullRange,
     valueRenderOption: 'FORMULA',
-  });
-  const currentFormulas = currentFormulasResponse.data.values || [];
+  })
+  const currentFormulas = currentFormulasResponse.data.values || []
 
   // Compare formulas
-  const changedCells: string[] = [];
-  const parsed = parseRange(fullRange);
+  const changedCells: string[] = []
+  const parsed = parseRange(fullRange)
   if (parsed) {
-    const resolvedSheet = parsed.sheetName || defaultSheetName || 'Sheet1';
+    const resolvedSheet = parsed.sheetName || defaultSheetName || 'Sheet1'
     for (let rowIdx = 0; rowIdx < currentFormulas.length; rowIdx++) {
-      const row = currentFormulas[rowIdx] || [];
+      const row = currentFormulas[rowIdx] || []
       for (let colIdx = 0; colIdx < row.length; colIdx++) {
-        const col = parsed.startCol + colIdx;
-        const rowNum = parsed.startRow + rowIdx;
-        const ref = `${resolvedSheet}!${columnToLetter(col)}${rowNum}`;
+        const col = parsed.startCol + colIdx
+        const rowNum = parsed.startRow + rowIdx
+        const ref = `${resolvedSheet}!${columnToLetter(col)}${rowNum}`
 
-        const currentVal = row[colIdx];
-        const currentFormula = currentVal?.startsWith?.('=') ? currentVal : null;
-        const cachedFormula = cachedFormulas.get(ref);
+        const currentVal = row[colIdx]
+        const currentFormula = currentVal?.startsWith?.('=') ? currentVal : null
+        const cachedFormula = cachedFormulas.get(ref)
 
         if (currentFormula !== cachedFormula) {
-          changedCells.push(ref);
+          changedCells.push(ref)
         }
       }
     }
   }
 
   if (changedCells.length > 0) {
-    invalidateRange(spreadsheetId, fullRange, defaultSheetName);
-    throw new ConcurrentModificationError(changedCells);
+    invalidateRange(spreadsheetId, fullRange, defaultSheetName)
+    throw new ConcurrentModificationError(changedCells)
   }
 
   // All checks passed, perform the update
@@ -330,50 +329,49 @@ export async function editSheet(
     requestBody: {
       values,
     },
-  });
+  })
 
   // Update cache with new formulas
-  const newFormulas = values.map(row => row.map(cell => cell?.startsWith?.('=') ? cell : null));
   if (parsed) {
-    const resolvedSheet = parsed.sheetName || defaultSheetName || 'Sheet1';
-    cacheFormulas(spreadsheetId, resolvedSheet, parsed.startCol, parsed.startRow, values);
+    const resolvedSheet = parsed.sheetName || defaultSheetName || 'Sheet1'
+    cacheFormulas(spreadsheetId, resolvedSheet, parsed.startCol, parsed.startRow, values)
   }
 
-  const updatedCells = response.data.updatedCells || 0;
+  const updatedCells = response.data.updatedCells || 0
   return {
     success: true,
     message: `Updated ${updatedCells} cell${updatedCells !== 1 ? 's' : ''} in ${fullRange}`,
     updatedCells,
-  };
+  }
 }
 
 // Helper to convert column number to letter
 function columnToLetter(col: number): string {
-  let result = '';
+  let result = ''
   while (col > 0) {
-    col--;
-    result = String.fromCharCode((col % 26) + 65) + result;
-    col = Math.floor(col / 26);
+    col--
+    result = String.fromCharCode((col % 26) + 65) + result
+    col = Math.floor(col / 26)
   }
-  return result;
+  return result
 }
 
 export async function appendSheet(
   spreadsheetIdOrUrl: string,
   values: string[][],
-  sheetName?: string
+  sheetName?: string,
 ): Promise<{ success: boolean; message: string; updatedRange: string }> {
-  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl);
-  const sheets = await getSheetsClient();
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
+  const sheets = await getSheetsClient()
 
   // If no sheet name, get the first sheet
-  let targetRange = sheetName || 'Sheet1';
+  let targetRange = sheetName || 'Sheet1'
   if (!sheetName) {
     const meta = await sheets.spreadsheets.get({
       spreadsheetId,
       fields: 'sheets.properties.title',
-    });
-    targetRange = meta.data.sheets?.[0]?.properties?.title || 'Sheet1';
+    })
+    targetRange = meta.data.sheets?.[0]?.properties?.title || 'Sheet1'
   }
 
   const response = await sheets.spreadsheets.values.append({
@@ -384,24 +382,24 @@ export async function appendSheet(
     requestBody: {
       values,
     },
-  });
+  })
 
-  const updatedRange = response.data.updates?.updatedRange || targetRange;
-  const updatedRows = response.data.updates?.updatedRows || values.length;
+  const updatedRange = response.data.updates?.updatedRange || targetRange
+  const updatedRows = response.data.updates?.updatedRows || values.length
 
   return {
     success: true,
     message: `Appended ${updatedRows} row${updatedRows !== 1 ? 's' : ''} to ${updatedRange}`,
     updatedRange,
-  };
+  }
 }
 
 export async function addSheet(
   spreadsheetIdOrUrl: string,
-  title: string
+  title: string,
 ): Promise<{ success: boolean; message: string; sheetId: number }> {
-  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl);
-  const sheets = await getSheetsClient();
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
+  const sheets = await getSheetsClient()
 
   const response = await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -416,14 +414,71 @@ export async function addSheet(
         },
       ],
     },
-  });
+  })
 
-  const newSheet = response.data.replies?.[0]?.addSheet?.properties;
-  const sheetId = newSheet?.sheetId ?? 0;
+  const newSheet = response.data.replies?.[0]?.addSheet?.properties
+  const sheetId = newSheet?.sheetId ?? 0
 
   return {
     success: true,
     message: `Added sheet "${title}" to spreadsheet`,
     sheetId,
-  };
+  }
+}
+
+export async function createSheet(
+  title: string,
+  folderIdOrUrl?: string,
+): Promise<{ id: string; title: string; url: string }> {
+  const drive = await getDriveClient()
+
+  const requestBody: { name: string; mimeType: string; parents?: string[] } = {
+    name: title,
+    mimeType: 'application/vnd.google-apps.spreadsheet',
+  }
+  if (folderIdOrUrl) {
+    requestBody.parents = [extractFolderId(folderIdOrUrl)]
+  }
+
+  const response = await drive.files.create({
+    requestBody,
+    fields: 'id, name',
+  })
+
+  const id = response.data.id || ''
+  return {
+    id,
+    title: response.data.name || title,
+    url: `https://docs.google.com/spreadsheets/d/${id}/edit`,
+  }
+}
+
+export async function copySheet(
+  spreadsheetIdOrUrl: string,
+  title?: string,
+  folderIdOrUrl?: string,
+): Promise<{ id: string; title: string; url: string }> {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
+  const drive = await getDriveClient()
+
+  const requestBody: { name?: string; parents?: string[] } = {}
+  if (title) {
+    requestBody.name = title
+  }
+  if (folderIdOrUrl) {
+    requestBody.parents = [extractFolderId(folderIdOrUrl)]
+  }
+
+  const response = await drive.files.copy({
+    fileId: spreadsheetId,
+    requestBody,
+    fields: 'id, name',
+  })
+
+  const id = response.data.id || ''
+  return {
+    id,
+    title: response.data.name || title || 'Copy',
+    url: `https://docs.google.com/spreadsheets/d/${id}/edit`,
+  }
 }
