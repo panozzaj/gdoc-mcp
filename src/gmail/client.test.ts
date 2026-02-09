@@ -662,6 +662,184 @@ describe('Gmail Client', () => {
       expect(decoded).toContain('Cc: cc@example.com')
     })
 
+    it('preserves existing attachments by default', async () => {
+      const attachmentContent = 'PDF file data here'
+      const attachmentBase64url = Buffer.from(attachmentContent).toString('base64url')
+
+      mockGmailClient.users.drafts.get.mockResolvedValue({
+        data: {
+          id: 'draft-1',
+          message: {
+            id: 'draft-msg-1',
+            threadId: 'thread-1',
+            payload: {
+              mimeType: 'multipart/mixed',
+              headers: [
+                { name: 'To', value: 'bob@example.com' },
+                { name: 'Subject', value: 'With Attachment' },
+              ],
+              body: {},
+              parts: [
+                {
+                  mimeType: 'text/plain',
+                  body: {
+                    data: Buffer.from('Original body').toString('base64url'),
+                  },
+                },
+                {
+                  mimeType: 'application/pdf',
+                  filename: 'report.pdf',
+                  body: {
+                    attachmentId: 'att-1',
+                    size: 1000,
+                  },
+                },
+              ],
+            },
+          },
+        },
+      })
+
+      // Mock fetching the attachment data
+      mockGmailClient.users.messages.attachments.get.mockResolvedValue({
+        data: { data: attachmentBase64url },
+      })
+
+      mockGmailClient.users.drafts.update.mockResolvedValue({
+        data: {
+          id: 'draft-1',
+          message: { id: 'draft-msg-1', threadId: 'thread-1' },
+        },
+      })
+
+      await updateDraft('draft-1', { subject: 'Updated Subject' })
+
+      // Verify attachment data was fetched
+      expect(mockGmailClient.users.messages.attachments.get).toHaveBeenCalledWith({
+        userId: 'me',
+        messageId: 'draft-msg-1',
+        id: 'att-1',
+      })
+
+      // Verify the rebuilt message includes the attachment
+      const call = mockGmailClient.users.drafts.update.mock.calls[0][0]
+      const decoded = Buffer.from(call.requestBody.message.raw, 'base64url').toString('utf-8')
+      expect(decoded).toContain('Subject: Updated Subject')
+      expect(decoded).toContain('multipart/mixed')
+      expect(decoded).toContain('Content-Disposition: attachment; filename="report.pdf"')
+      expect(decoded).toContain('application/pdf')
+    })
+
+    it('removes attachments when removeAttachments is true', async () => {
+      mockGmailClient.users.drafts.get.mockResolvedValue({
+        data: {
+          id: 'draft-1',
+          message: {
+            id: 'draft-msg-1',
+            threadId: 'thread-1',
+            payload: {
+              mimeType: 'multipart/mixed',
+              headers: [
+                { name: 'To', value: 'bob@example.com' },
+                { name: 'Subject', value: 'With Attachment' },
+              ],
+              body: {},
+              parts: [
+                {
+                  mimeType: 'text/plain',
+                  body: {
+                    data: Buffer.from('Body text').toString('base64url'),
+                  },
+                },
+                {
+                  mimeType: 'application/pdf',
+                  filename: 'report.pdf',
+                  body: {
+                    attachmentId: 'att-1',
+                    size: 1000,
+                  },
+                },
+              ],
+            },
+          },
+        },
+      })
+
+      mockGmailClient.users.drafts.update.mockResolvedValue({
+        data: {
+          id: 'draft-1',
+          message: { id: 'draft-msg-1', threadId: 'thread-1' },
+        },
+      })
+
+      await updateDraft('draft-1', { subject: 'No Attachments', removeAttachments: true })
+
+      // Should NOT fetch attachment data
+      expect(mockGmailClient.users.messages.attachments.get).not.toHaveBeenCalled()
+
+      // Verify the rebuilt message has no attachment
+      const call = mockGmailClient.users.drafts.update.mock.calls[0][0]
+      const decoded = Buffer.from(call.requestBody.message.raw, 'base64url').toString('utf-8')
+      expect(decoded).toContain('Subject: No Attachments')
+      expect(decoded).not.toContain('multipart/mixed')
+      expect(decoded).not.toContain('Content-Disposition: attachment')
+    })
+
+    it('preserves inline attachment data without separate fetch', async () => {
+      const inlineData = Buffer.from('inline content').toString('base64url')
+
+      mockGmailClient.users.drafts.get.mockResolvedValue({
+        data: {
+          id: 'draft-1',
+          message: {
+            id: 'draft-msg-1',
+            threadId: 'thread-1',
+            payload: {
+              mimeType: 'multipart/mixed',
+              headers: [
+                { name: 'To', value: 'bob@example.com' },
+                { name: 'Subject', value: 'Inline' },
+              ],
+              body: {},
+              parts: [
+                {
+                  mimeType: 'text/plain',
+                  body: {
+                    data: Buffer.from('Body').toString('base64url'),
+                  },
+                },
+                {
+                  mimeType: 'text/csv',
+                  filename: 'data.csv',
+                  body: {
+                    data: inlineData,
+                    size: 100,
+                  },
+                },
+              ],
+            },
+          },
+        },
+      })
+
+      mockGmailClient.users.drafts.update.mockResolvedValue({
+        data: {
+          id: 'draft-1',
+          message: { id: 'draft-msg-1', threadId: 'thread-1' },
+        },
+      })
+
+      await updateDraft('draft-1', { body: 'New body' })
+
+      // Should NOT need to fetch attachment data separately
+      expect(mockGmailClient.users.messages.attachments.get).not.toHaveBeenCalled()
+
+      const call = mockGmailClient.users.drafts.update.mock.calls[0][0]
+      const decoded = Buffer.from(call.requestBody.message.raw, 'base64url').toString('utf-8')
+      expect(decoded).toContain('Content-Disposition: attachment; filename="data.csv"')
+      expect(decoded).toContain('New body')
+    })
+
     it('passes correct params to get and update', async () => {
       mockGmailClient.users.drafts.get.mockResolvedValue({
         data: {

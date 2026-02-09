@@ -109,6 +109,12 @@ export interface AttachmentInfo {
   partId: string
 }
 
+interface EmbeddedAttachment {
+  filename: string
+  mimeType: string
+  base64Data: string // standard base64
+}
+
 const MIME_TYPES: Record<string, string> = {
   '.pdf': 'application/pdf',
   '.doc': 'application/msword',
@@ -147,6 +153,7 @@ function buildRawMessage(
   body: string,
   extraHeaders?: Record<string, string>,
   attachments?: string[],
+  embeddedAttachments?: EmbeddedAttachment[],
 ): string {
   const headerLines = [`To: ${to}`, `Subject: ${subject}`, 'MIME-Version: 1.0']
 
@@ -156,7 +163,10 @@ function buildRawMessage(
     }
   }
 
-  if (!attachments || attachments.length === 0) {
+  const hasFileAttachments = attachments && attachments.length > 0
+  const hasEmbeddedAttachments = embeddedAttachments && embeddedAttachments.length > 0
+
+  if (!hasFileAttachments && !hasEmbeddedAttachments) {
     headerLines.push('Content-Type: text/plain; charset="UTF-8"')
     headerLines.push('', body)
     const raw = headerLines.join('\r\n')
@@ -176,20 +186,34 @@ function buildRawMessage(
   parts.push('')
   parts.push(body)
 
-  // Attachment parts
-  for (const filePath of attachments) {
-    const resolvedPath = path.resolve(filePath)
-    const fileData = fs.readFileSync(resolvedPath)
-    const fileName = path.basename(resolvedPath)
-    const mimeType = getMimeType(resolvedPath)
-    const base64Data = fileData.toString('base64')
+  // File attachment parts
+  if (hasFileAttachments) {
+    for (const filePath of attachments) {
+      const resolvedPath = path.resolve(filePath)
+      const fileData = fs.readFileSync(resolvedPath)
+      const fileName = path.basename(resolvedPath)
+      const mimeType = getMimeType(resolvedPath)
+      const base64Data = fileData.toString('base64')
 
-    parts.push(`--${boundary}`)
-    parts.push(`Content-Type: ${mimeType}; name="${fileName}"`)
-    parts.push('Content-Transfer-Encoding: base64')
-    parts.push(`Content-Disposition: attachment; filename="${fileName}"`)
-    parts.push('')
-    parts.push(base64Data)
+      parts.push(`--${boundary}`)
+      parts.push(`Content-Type: ${mimeType}; name="${fileName}"`)
+      parts.push('Content-Transfer-Encoding: base64')
+      parts.push(`Content-Disposition: attachment; filename="${fileName}"`)
+      parts.push('')
+      parts.push(base64Data)
+    }
+  }
+
+  // Embedded attachment parts (preserved from existing draft)
+  if (hasEmbeddedAttachments) {
+    for (const att of embeddedAttachments) {
+      parts.push(`--${boundary}`)
+      parts.push(`Content-Type: ${att.mimeType}; name="${att.filename}"`)
+      parts.push('Content-Transfer-Encoding: base64')
+      parts.push(`Content-Disposition: attachment; filename="${att.filename}"`)
+      parts.push('')
+      parts.push(att.base64Data)
+    }
   }
 
   parts.push(`--${boundary}--`)
@@ -445,9 +469,55 @@ export async function createReplyDraft(messageId: string, body: string): Promise
   }
 }
 
+async function extractExistingAttachments(
+  gmail: gmail_v1.Gmail,
+  messageId: string,
+  payload: gmail_v1.Schema$MessagePart | undefined,
+): Promise<EmbeddedAttachment[]> {
+  if (!payload) return []
+
+  const result: EmbeddedAttachment[] = []
+
+  if (payload.filename && payload.filename.length > 0) {
+    let data = payload.body?.data
+    if (!data && payload.body?.attachmentId) {
+      const response = await gmail.users.messages.attachments.get({
+        userId: 'me',
+        messageId,
+        id: payload.body.attachmentId,
+      })
+      data = response.data.data || undefined
+    }
+    if (data) {
+      // Gmail returns base64url; convert to standard base64 for MIME
+      const base64Data = Buffer.from(data, 'base64url').toString('base64')
+      result.push({
+        filename: payload.filename,
+        mimeType: payload.mimeType || 'application/octet-stream',
+        base64Data,
+      })
+    }
+  }
+
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      result.push(...(await extractExistingAttachments(gmail, messageId, part)))
+    }
+  }
+
+  return result
+}
+
 export async function updateDraft(
   draftId: string,
-  updates: { to?: string; subject?: string; body?: string; cc?: string; bcc?: string },
+  updates: {
+    to?: string
+    subject?: string
+    body?: string
+    cc?: string
+    bcc?: string
+    removeAttachments?: boolean
+  },
 ): Promise<DraftInfo> {
   const gmail = await getGmailClient()
 
@@ -477,11 +547,23 @@ export async function updateDraft(
   if (cc) extraHeaders['Cc'] = cc
   if (bcc) extraHeaders['Bcc'] = bcc
 
+  // Preserve existing attachments unless explicitly removing them
+  let preserved: EmbeddedAttachment[] = []
+  if (!updates.removeAttachments) {
+    preserved = await extractExistingAttachments(
+      gmail,
+      existing.data.message?.id || '',
+      existing.data.message?.payload,
+    )
+  }
+
   const raw = buildRawMessage(
     to,
     subject,
     body,
     Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined,
+    undefined,
+    preserved.length > 0 ? preserved : undefined,
   )
 
   const response = await gmail.users.drafts.update({

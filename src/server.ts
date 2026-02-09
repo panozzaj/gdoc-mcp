@@ -824,7 +824,8 @@ server.addTool({
   name: 'gmail_update_draft',
   description:
     'Update an existing email draft. Only provided fields are changed. ' +
-    'Preserves threading headers for reply drafts.',
+    'Preserves threading headers for reply drafts. ' +
+    'Existing attachments are preserved by default; set removeAttachments to strip them.',
   parameters: z.object({
     draftId: z.string().describe('Draft ID (from gmail_create_draft or gmail_create_reply_draft)'),
     to: z.string().optional().describe('New recipient'),
@@ -832,14 +833,19 @@ server.addTool({
     body: z.string().optional().describe('New body (plain text)'),
     cc: z.string().optional().describe('New CC'),
     bcc: z.string().optional().describe('New BCC'),
+    removeAttachments: z
+      .boolean()
+      .optional()
+      .describe('Set to true to remove all attachments from the draft'),
   }),
-  execute: async ({ draftId, to, subject, body, cc, bcc }) => {
-    const updates: Record<string, string | undefined> = {}
+  execute: async ({ draftId, to, subject, body, cc, bcc, removeAttachments }) => {
+    const updates: Record<string, string | boolean | undefined> = {}
     if (to !== undefined) updates.to = to
     if (subject !== undefined) updates.subject = subject
     if (body !== undefined) updates.body = body
     if (cc !== undefined) updates.cc = cc
     if (bcc !== undefined) updates.bcc = bcc
+    if (removeAttachments) updates.removeAttachments = true
 
     const draft = await updateDraft(draftId, updates)
     const parts = [
