@@ -120,15 +120,16 @@ Add to your Claude MCP config:
 
 ### Google Sheets
 
-| Tool               | Description                           |
-| ------------------ | ------------------------------------- |
-| `gsheet_read`      | Read a Google Sheet as markdown table |
-| `gsheet_edit`      | Update cells in a sheet               |
-| `gsheet_append`    | Append rows to a sheet                |
-| `gsheet_add_sheet` | Add a new sheet (tab)                 |
-| `gsheet_info`      | Get spreadsheet metadata              |
-| `gsheet_create`    | Create a new blank spreadsheet        |
-| `gsheet_copy`      | Copy an existing spreadsheet          |
+| Tool                 | Description                                  |
+| -------------------- | -------------------------------------------- |
+| `gsheet_read`        | Read a Google Sheet as markdown table        |
+| `gsheet_edit`        | Update cells in a sheet                      |
+| `gsheet_append`      | Append rows to a sheet                       |
+| `gsheet_add_sheet`   | Add a new sheet (tab)                        |
+| `gsheet_clone_sheet` | Clone/duplicate a sheet within a spreadsheet |
+| `gsheet_info`        | Get spreadsheet metadata                     |
+| `gsheet_create`      | Create a new blank spreadsheet               |
+| `gsheet_copy`        | Copy an existing spreadsheet                 |
 
 ### Google Calendar
 

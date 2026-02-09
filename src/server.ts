@@ -15,6 +15,7 @@ import {
   editSheet,
   appendSheet,
   addSheet,
+  cloneSheet,
   getSheetInfo,
   createSheet,
   copySheet,
@@ -362,6 +363,25 @@ server.addTool({
   }),
   execute: async ({ spreadsheetId, title }) => {
     const result = await addSheet(spreadsheetId, title)
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+    }
+  },
+})
+
+// Tool: Clone a sheet within a spreadsheet
+server.addTool({
+  name: 'gsheet_clone_sheet',
+  description:
+    'Clone/duplicate an existing sheet (tab) within the same spreadsheet. ' +
+    'Preserves all formatting, formulas, and cell values.',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+    sourceSheetName: z.string().describe('Name of the sheet to clone'),
+    newSheetName: z.string().describe('Name for the cloned sheet'),
+  }),
+  execute: async ({ spreadsheetId, sourceSheetName, newSheetName }) => {
+    const result = await cloneSheet(spreadsheetId, sourceSheetName, newSheetName)
     return {
       content: [{ type: 'text' as const, text: result.message }],
     }

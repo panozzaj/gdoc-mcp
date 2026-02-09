@@ -426,6 +426,55 @@ export async function addSheet(
   }
 }
 
+export async function cloneSheet(
+  spreadsheetIdOrUrl: string,
+  sourceSheetName: string,
+  newSheetName: string,
+): Promise<{ success: boolean; message: string; sheetId: number }> {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
+  const sheets = await getSheetsClient()
+
+  // Look up the source sheet's numeric ID by name
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties',
+  })
+
+  const sourceSheet = (meta.data.sheets || []).find((s) => s.properties?.title === sourceSheetName)
+  if (!sourceSheet) {
+    const available = (meta.data.sheets || []).map((s) => s.properties?.title).join(', ')
+    throw new Error(`Sheet "${sourceSheetName}" not found. Available: ${available}`)
+  }
+
+  const sourceSheetId = sourceSheet.properties?.sheetId
+  if (sourceSheetId == null) {
+    throw new Error(`Could not determine sheet ID for "${sourceSheetName}"`)
+  }
+
+  const response = await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          duplicateSheet: {
+            sourceSheetId,
+            newSheetName,
+          },
+        },
+      ],
+    },
+  })
+
+  const newSheet = response.data.replies?.[0]?.duplicateSheet?.properties
+  const sheetId = newSheet?.sheetId ?? 0
+
+  return {
+    success: true,
+    message: `Cloned "${sourceSheetName}" as "${newSheetName}"`,
+    sheetId,
+  }
+}
+
 export async function createSheet(
   title: string,
   folderIdOrUrl?: string,
