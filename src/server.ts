@@ -32,6 +32,17 @@ import {
   deleteEvent,
   quickAdd,
 } from './calendar/client.js'
+import {
+  listMessages,
+  listDrafts,
+  readMessage,
+  listAttachments,
+  saveAttachment,
+  createDraft,
+  createReplyDraft,
+  updateDraft,
+  deleteDraft,
+} from './gmail/client.js'
 
 const server = new FastMCP({
   name: 'gdoc-mcp',
@@ -651,6 +662,227 @@ server.addTool({
           text: `Created event "${event.summary}"\nStart: ${event.start}\nEnd: ${event.end}\nID: ${event.id}`,
         },
       ],
+    }
+  },
+})
+
+// ============ Gmail Tools ============
+
+server.addTool({
+  name: 'gmail_list_messages',
+  description:
+    'Search and list emails using Gmail search syntax. ' +
+    'Examples: "from:alice", "subject:invoice", "is:unread", "newer_than:7d". ' +
+    'Returns message summaries with IDs for use with gmail_read_message.',
+  parameters: z.object({
+    query: z
+      .string()
+      .optional()
+      .describe(
+        'Gmail search query (e.g. "from:alice@example.com", "is:unread", "subject:invoice"). Omit to list recent messages.',
+      ),
+    maxResults: z
+      .number()
+      .optional()
+      .default(10)
+      .describe('Max messages to return (default: 10, max: 50)'),
+  }),
+  execute: async ({ query, maxResults }) => {
+    const messages = await listMessages(query, maxResults)
+    if (messages.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No messages found.' }] }
+    }
+    const lines = messages.map(
+      (m) =>
+        `- **${m.subject || '(no subject)'}**\n  From: ${m.from}\n  Date: ${m.date}\n  ${m.snippet}\n  ID: ${m.id}`,
+    )
+    let text = lines.join('\n\n')
+    if (query) {
+      text += `\n\nSearch in Gmail: https://mail.google.com/mail/#search/${encodeURIComponent(query)}`
+    }
+    return { content: [{ type: 'text' as const, text }] }
+  },
+})
+
+server.addTool({
+  name: 'gmail_read_message',
+  description:
+    'Read the full content of an email message by ID. ' +
+    'Returns headers, body text, and labels. Use gmail_list_messages to find message IDs, then gmail_read_message to read one.',
+  parameters: z.object({
+    messageId: z.string().describe('Message ID (from gmail_list_messages results)'),
+  }),
+  execute: async ({ messageId }) => {
+    const msg = await readMessage(messageId)
+    const parts = [`**${msg.subject || '(no subject)'}**`, `From: ${msg.from}`, `To: ${msg.to}`]
+    if (msg.cc) parts.push(`Cc: ${msg.cc}`)
+    parts.push(`Date: ${msg.date}`)
+    if (msg.labels.length > 0) parts.push(`Labels: ${msg.labels.join(', ')}`)
+    parts.push(`Link: https://mail.google.com/mail/#inbox/${messageId}`)
+    parts.push('', msg.body)
+    return { content: [{ type: 'text' as const, text: parts.join('\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gmail_list_drafts',
+  description: 'List existing email drafts. Returns draft IDs, subjects, and recipients.',
+  parameters: z.object({
+    maxResults: z
+      .number()
+      .optional()
+      .default(10)
+      .describe('Max drafts to return (default: 10, max: 50)'),
+  }),
+  execute: async ({ maxResults }) => {
+    const drafts = await listDrafts(maxResults)
+    if (drafts.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No drafts found.' }] }
+    }
+    const lines = drafts.map(
+      (d) =>
+        `- **${d.subject || '(no subject)'}**\n  To: ${d.to || '(no recipient)'}\n  ${d.snippet}\n  Draft ID: ${d.draftId}`,
+    )
+    return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gmail_create_draft',
+  description:
+    'Create a new email draft. The draft is saved but NOT sent. ' +
+    'The user can review and send it from Gmail.',
+  parameters: z.object({
+    to: z.string().describe('Recipient email address'),
+    subject: z.string().describe('Email subject'),
+    body: z.string().describe('Email body (plain text)'),
+    cc: z.string().optional().describe('CC email address(es)'),
+    bcc: z.string().optional().describe('BCC email address(es)'),
+    attachments: z.array(z.string()).optional().describe('List of local file paths to attach'),
+  }),
+  execute: async ({ to, subject, body, cc, bcc, attachments }) => {
+    const draft = await createDraft(to, subject, body, cc, bcc, attachments)
+    const parts = [
+      `Draft created: "${draft.subject}"`,
+      `To: ${draft.to}`,
+      `Draft ID: ${draft.draftId}`,
+    ]
+    if (draft.messageId) {
+      parts.push(`Link: https://mail.google.com/mail/#drafts/${draft.messageId}`)
+    }
+    return { content: [{ type: 'text' as const, text: parts.join('\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gmail_create_reply_draft',
+  description:
+    'Create a reply draft to an existing email message. ' +
+    'Threads correctly with the original conversation. The draft is saved but NOT sent.',
+  parameters: z.object({
+    messageId: z
+      .string()
+      .describe('Message ID to reply to (from gmail_list_messages or gmail_read_message)'),
+    body: z.string().describe('Reply body (plain text)'),
+  }),
+  execute: async ({ messageId, body }) => {
+    const draft = await createReplyDraft(messageId, body)
+    const parts = [
+      `Reply draft created: "${draft.subject}"`,
+      `To: ${draft.to}`,
+      `Thread ID: ${draft.threadId}`,
+      `Draft ID: ${draft.draftId}`,
+    ]
+    if (draft.messageId) {
+      parts.push(`Link: https://mail.google.com/mail/#drafts/${draft.messageId}`)
+    }
+    return { content: [{ type: 'text' as const, text: parts.join('\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gmail_update_draft',
+  description:
+    'Update an existing email draft. Only provided fields are changed. ' +
+    'Preserves threading headers for reply drafts.',
+  parameters: z.object({
+    draftId: z.string().describe('Draft ID (from gmail_create_draft or gmail_create_reply_draft)'),
+    to: z.string().optional().describe('New recipient'),
+    subject: z.string().optional().describe('New subject'),
+    body: z.string().optional().describe('New body (plain text)'),
+    cc: z.string().optional().describe('New CC'),
+    bcc: z.string().optional().describe('New BCC'),
+  }),
+  execute: async ({ draftId, to, subject, body, cc, bcc }) => {
+    const updates: Record<string, string | undefined> = {}
+    if (to !== undefined) updates.to = to
+    if (subject !== undefined) updates.subject = subject
+    if (body !== undefined) updates.body = body
+    if (cc !== undefined) updates.cc = cc
+    if (bcc !== undefined) updates.bcc = bcc
+
+    const draft = await updateDraft(draftId, updates)
+    const parts = [
+      `Draft updated: "${draft.subject}"`,
+      `To: ${draft.to}`,
+      `Draft ID: ${draft.draftId}`,
+    ]
+    if (draft.messageId) {
+      parts.push(`Link: https://mail.google.com/mail/#drafts/${draft.messageId}`)
+    }
+    return { content: [{ type: 'text' as const, text: parts.join('\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gmail_list_message_attachments',
+  description:
+    'List attachments on an email message. Returns filenames, MIME types, sizes, and attachment IDs ' +
+    'for use with gmail_save_attachment.',
+  parameters: z.object({
+    messageId: z.string().describe('Message ID (from gmail_list_messages or gmail_read_message)'),
+  }),
+  execute: async ({ messageId }) => {
+    const attachmentsList = await listAttachments(messageId)
+    if (attachmentsList.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No attachments found.' }] }
+    }
+    const lines = attachmentsList.map(
+      (a) =>
+        `- **${a.filename}**\n  Type: ${a.mimeType}\n  Size: ${a.size} bytes\n  Attachment ID: ${a.attachmentId}`,
+    )
+    return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gmail_save_attachment',
+  description:
+    'Download and save an email attachment to a local file. ' +
+    'Use gmail_list_message_attachments to get attachment IDs.',
+  parameters: z.object({
+    messageId: z.string().describe('Message ID the attachment belongs to'),
+    attachmentId: z.string().describe('Attachment ID (from gmail_list_attachments)'),
+    savePath: z.string().describe('Local file path to save the attachment to'),
+  }),
+  execute: async ({ messageId, attachmentId, savePath }) => {
+    const savedTo = await saveAttachment(messageId, attachmentId, savePath)
+    return {
+      content: [{ type: 'text' as const, text: `Attachment saved to: ${savedTo}` }],
+    }
+  },
+})
+
+server.addTool({
+  name: 'gmail_delete_draft',
+  description: 'Permanently delete an email draft.',
+  parameters: z.object({
+    draftId: z.string().describe('Draft ID to delete'),
+  }),
+  execute: async ({ draftId }) => {
+    await deleteDraft(draftId)
+    return {
+      content: [{ type: 'text' as const, text: `Deleted draft ${draftId}` }],
     }
   },
 })

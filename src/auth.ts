@@ -1,4 +1,4 @@
-import { google, docs_v1, drive_v3, sheets_v4, calendar_v3 } from 'googleapis'
+import { google, docs_v1, drive_v3, sheets_v4, calendar_v3, gmail_v1 } from 'googleapis'
 import { getOAuth2Client, OAUTH_SETUP_HELP, REAUTH_HELP } from './oauth.js'
 
 export async function getDocsClient(): Promise<docs_v1.Docs> {
@@ -19,6 +19,11 @@ export async function getSheetsClient(): Promise<sheets_v4.Sheets> {
 export async function getCalendarClient(): Promise<calendar_v3.Calendar> {
   const auth = await getAuth()
   return google.calendar({ version: 'v3', auth })
+}
+
+export async function getGmailClient(): Promise<gmail_v1.Gmail> {
+  const auth = await getAuth()
+  return google.gmail({ version: 'v1', auth })
 }
 
 async function getAuth() {

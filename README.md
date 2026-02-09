@@ -1,6 +1,6 @@
 # gdoc-mcp
 
-An MCP server that lets Claude read and edit Google Docs, Sheets, and Calendar using markdown syntax.
+An MCP server that lets Claude read and edit Google Docs, Sheets, Calendar, and Gmail using markdown syntax.
 
 ## Features
 
@@ -28,6 +28,15 @@ An MCP server that lets Claude read and edit Google Docs, Sheets, and Calendar u
 - All-day and timed events
 - Natural language event creation (e.g. "Lunch tomorrow at noon")
 
+**Gmail**
+
+- List and search emails with Gmail search syntax
+- Read full message content (plain text extraction)
+- Create drafts (new or reply) with optional file attachments — drafts are NOT sent
+- Update and delete existing drafts
+- Reply drafts thread correctly with original conversations
+- List and save email attachments to local files
+
 **Concurrency Safety**
 
 - Requires read-before-edit (ensures you've seen the content)
@@ -54,6 +63,7 @@ Uses OAuth 2.0 for authentication with all Google Workspace APIs.
    - Google Sheets API
    - Google Drive API
    - Google Calendar API
+   - Gmail API
 4. Configure OAuth consent screen:
    - User type: External
    - Add your email as a test user
@@ -132,6 +142,20 @@ Add to your Claude MCP config:
 | `gcal_delete_event`    | Delete an event                           |
 | `gcal_quick_add_event` | Create event from natural language        |
 
+### Gmail
+
+| Tool                             | Description                                  |
+| -------------------------------- | -------------------------------------------- |
+| `gmail_list_messages`            | Search/list emails using Gmail search syntax |
+| `gmail_list_drafts`              | List existing email drafts                   |
+| `gmail_read_message`             | Read full message content by ID              |
+| `gmail_list_message_attachments` | List attachments on a message                |
+| `gmail_save_attachment`          | Save an attachment to a local file           |
+| `gmail_create_draft`             | Create a new draft with optional attachments |
+| `gmail_create_reply_draft`       | Create a threaded reply draft (not sent)     |
+| `gmail_update_draft`             | Update an existing draft                     |
+| `gmail_delete_draft`             | Permanently delete a draft                   |
+
 ## Comparison with Other MCP Servers
 
 Most Google Docs MCP servers have no concurrency protection, making them vulnerable to silent data loss when documents are edited concurrently.
@@ -160,6 +184,7 @@ This prevents silent overwrites while allowing concurrent edits to different par
 - **Edit scope**: Text in paragraphs and table cells can be edited with inline formatting. Headings, lists, and images are readable but not directly editable.
 - **Complex formatting**: Colors, fonts, and nested styles aren't preserved.
 - **Calendar**: Recurring event management not yet supported.
+- **Gmail**: Draft and read only — no send capability (by design, for safety). Plain text drafts only.
 
 ## Development
 

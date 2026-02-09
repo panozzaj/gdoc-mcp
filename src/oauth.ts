@@ -16,6 +16,8 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/documents',
   'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.compose',
 ]
 
 let cachedOAuth2Client: OAuth2Client | null = null
@@ -101,10 +103,12 @@ export async function getOAuth2Client(): Promise<OAuth2Client | null> {
 }
 
 export const OAUTH_SETUP_HELP =
-  'To set up OAuth (required for Calendar, recommended for all APIs):\n' +
-  '1. Create an OAuth 2.0 Client ID at https://console.cloud.google.com/apis/credentials\n' +
+  'To set up OAuth (required for Calendar and Gmail, recommended for all APIs):\n' +
+  '1. Enable APIs at https://console.cloud.google.com/apis/library\n' +
+  '   (Google Docs, Sheets, Drive, Calendar, and Gmail APIs)\n' +
+  '2. Create an OAuth 2.0 Client ID at https://console.cloud.google.com/apis/credentials\n' +
   '   (Application type: Desktop app)\n' +
-  '2. Download the JSON and save as ~/.config/gdoc-mcp/client_secret.json\n' +
-  '3. Run: npm run auth'
+  '3. Download the JSON and save as ~/.config/gdoc-mcp/client_secret.json\n' +
+  '4. Run: npm run auth'
 
 export const REAUTH_HELP = 'Your OAuth tokens have expired or been revoked.\n' + 'Run: npm run auth'

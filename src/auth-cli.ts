@@ -67,8 +67,10 @@ async function main() {
     console.error(`\nLooked in:\n${CLIENT_SECRET_PATHS.map((p) => `  - ${p}`).join('\n')}`)
     console.error('\nTo create one:')
     console.error('1. Go to https://console.cloud.google.com/apis/credentials')
-    console.error('2. Create OAuth 2.0 Client ID (Desktop app type)')
-    console.error('3. Download JSON and save as:')
+    console.error('2. Enable APIs (APIs & Services > Enable APIs):')
+    console.error('   Google Docs, Sheets, Drive, Calendar, and Gmail APIs')
+    console.error('3. Create OAuth 2.0 Client ID (Desktop app type)')
+    console.error('4. Download JSON and save as:')
     console.error(`   ${CONFIG_DIR}/client_secret.json`)
     process.exit(1)
   }
@@ -204,7 +206,7 @@ async function main() {
   console.log('\nScopes granted:')
   SCOPES.forEach((s) => console.log(`  - ${s.split('/').pop()}`))
 
-  console.log('\nYou can now use all gdoc-mcp tools including Google Calendar.')
+  console.log('\nYou can now use all gdoc-mcp tools including Google Calendar and Gmail.')
   console.log('If running as an MCP server, restart it to pick up the new credentials.')
 }
 
