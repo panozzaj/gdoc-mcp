@@ -70,10 +70,10 @@ export async function readSheet(
   const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
   const sheets = await getSheetsClient()
 
-  // Get spreadsheet metadata first
+  // Get spreadsheet metadata (including merge info)
   const metaResponse = await sheets.spreadsheets.get({
     spreadsheetId,
-    fields: 'properties.title,sheets.properties',
+    fields: 'properties.title,sheets.properties,sheets.merges',
   })
 
   const spreadsheetTitle = metaResponse.data.properties?.title || 'Untitled'
@@ -192,24 +192,57 @@ export async function readSheet(
     })),
   )
 
-  // Convert to markdown table (use paddedRows for consistency with cache)
+  // Normalize column count: pad all rows to the same width
+  const colCount = paddedRows.reduce((max, row) => Math.max(max, row.length), 0)
+  for (const row of paddedRows) {
+    while (row.length < colCount) row.push('')
+  }
+
+  // Convert to markdown table with row/column labels
   let content: string
   if (paddedRows.length === 0) {
     content = '(empty sheet)'
   } else {
+    const colLabels = Array.from({ length: colCount }, (_, i) => columnToLetter(startCol + i))
     const lines: string[] = []
 
-    for (let i = 0; i < paddedRows.length; i++) {
-      const row = paddedRows[i]
-      lines.push(`| ${row.join(' | ')} |`)
+    // Column header row
+    lines.push(`|   | ${colLabels.join(' | ')} |`)
+    lines.push(`| --- | ${colLabels.map(() => '---').join(' | ')} |`)
 
-      // Add header separator after first row
-      if (i === 0) {
-        lines.push(`| ${row.map(() => '---').join(' | ')} |`)
-      }
+    // Data rows with row numbers
+    for (let i = 0; i < paddedRows.length; i++) {
+      const rowNum = startRow + i
+      lines.push(`| ${rowNum} | ${paddedRows[i].join(' | ')} |`)
     }
 
     content = lines.join('\n')
+  }
+
+  // Append merge annotations for the target sheet
+  const targetSheetData = metaResponse.data.sheets?.find((s) => s.properties?.title === sheetTitle)
+  const merges = targetSheetData?.merges || []
+  if (merges.length > 0) {
+    // Filter to merges that overlap with the read range (convert to 0-indexed for comparison)
+    const startRow0 = startRow - 1
+    const startCol0 = startCol - 1
+    const relevantMerges = merges.filter((m) => {
+      const mStartRow = m.startRowIndex ?? 0
+      const mEndRow = m.endRowIndex ?? 0
+      const mStartCol = m.startColumnIndex ?? 0
+      const mEndCol = m.endColumnIndex ?? 0
+      return mStartRow < endRow && mEndRow > startRow0 && mStartCol < endCol && mEndCol > startCol0
+    })
+
+    if (relevantMerges.length > 0) {
+      const mergeLabels = relevantMerges.map((m) => {
+        // API uses 0-indexed, exclusive end bounds
+        const s = `${columnToLetter((m.startColumnIndex ?? 0) + 1)}${(m.startRowIndex ?? 0) + 1}`
+        const e = `${columnToLetter(m.endColumnIndex ?? 0)}${m.endRowIndex ?? 0}`
+        return `${s}:${e}`
+      })
+      content += `\n\nMerged cells: ${mergeLabels.join(', ')}`
+    }
   }
 
   return {
@@ -218,7 +251,7 @@ export async function readSheet(
     sheetTitle,
     content,
     rowCount: paddedRows.length,
-    columnCount: paddedRows.length > 0 ? paddedRows[0].length : 0,
+    columnCount: colCount,
   }
 }
 
