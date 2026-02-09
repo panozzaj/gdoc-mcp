@@ -354,57 +354,6 @@ server.addTool({
   },
 })
 
-// Tool: Add a new tab to a spreadsheet
-server.addTool({
-  name: 'gsheet_add_tab',
-  description: 'Add a new tab to an existing Google Spreadsheet.',
-  parameters: z.object({
-    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
-    title: z.string().describe('Name for the new tab'),
-  }),
-  execute: async ({ spreadsheetId, title }) => {
-    const result = await addSheet(spreadsheetId, title)
-    return {
-      content: [{ type: 'text' as const, text: result.message }],
-    }
-  },
-})
-
-// Tool: Clone a tab within a spreadsheet
-server.addTool({
-  name: 'gsheet_clone_tab',
-  description:
-    'Clone/duplicate an existing tab within the same spreadsheet. ' +
-    'Preserves all formatting, formulas, and cell values.',
-  parameters: z.object({
-    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
-    sourceSheetName: z.string().describe('Name of the tab to clone'),
-    newSheetName: z.string().describe('Name for the cloned tab'),
-  }),
-  execute: async ({ spreadsheetId, sourceSheetName, newSheetName }) => {
-    const result = await cloneSheet(spreadsheetId, sourceSheetName, newSheetName)
-    return {
-      content: [{ type: 'text' as const, text: result.message }],
-    }
-  },
-})
-
-// Tool: Delete a tab from a spreadsheet
-server.addTool({
-  name: 'gsheet_delete_tab',
-  description: 'Delete a tab from a Google Spreadsheet. Cannot delete the last remaining tab.',
-  parameters: z.object({
-    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
-    sheetName: z.string().describe('Name of the tab to delete'),
-  }),
-  execute: async ({ spreadsheetId, sheetName }) => {
-    const result = await deleteTab(spreadsheetId, sheetName)
-    return {
-      content: [{ type: 'text' as const, text: result.message }],
-    }
-  },
-})
-
 // Tool: Get Sheet Info
 server.addTool({
   name: 'gsheet_info',
@@ -479,6 +428,57 @@ server.addTool({
           text: `Copied spreadsheet as "${result.title}"\nID: ${result.id}\nURL: ${result.url}`,
         },
       ],
+    }
+  },
+})
+
+// Tool: Add a new tab to a spreadsheet
+server.addTool({
+  name: 'gsheet_add_tab',
+  description: 'Add a new tab to an existing Google Spreadsheet.',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+    title: z.string().describe('Name for the new tab'),
+  }),
+  execute: async ({ spreadsheetId, title }) => {
+    const result = await addSheet(spreadsheetId, title)
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+    }
+  },
+})
+
+// Tool: Clone a tab within a spreadsheet
+server.addTool({
+  name: 'gsheet_clone_tab',
+  description:
+    'Clone/duplicate an existing tab within the same spreadsheet. ' +
+    'Preserves all formatting, formulas, and cell values.',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+    sourceSheetName: z.string().describe('Name of the tab to clone'),
+    newSheetName: z.string().describe('Name for the cloned tab'),
+  }),
+  execute: async ({ spreadsheetId, sourceSheetName, newSheetName }) => {
+    const result = await cloneSheet(spreadsheetId, sourceSheetName, newSheetName)
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+    }
+  },
+})
+
+// Tool: Delete a tab from a spreadsheet
+server.addTool({
+  name: 'gsheet_delete_tab',
+  description: 'Delete a tab from a Google Spreadsheet. Cannot delete the last remaining tab.',
+  parameters: z.object({
+    spreadsheetId: z.string().describe('Google Spreadsheet ID or full URL'),
+    sheetName: z.string().describe('Name of the tab to delete'),
+  }),
+  execute: async ({ spreadsheetId, sheetName }) => {
+    const result = await deleteTab(spreadsheetId, sheetName)
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
     }
   },
 })
