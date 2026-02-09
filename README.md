@@ -134,9 +134,9 @@ Add to your Claude MCP config:
 
 | Tool                   | Description                               |
 | ---------------------- | ----------------------------------------- |
-| `gcal_calendars`       | List all calendars you have access to     |
+| `gcal_list_calendars`  | List all calendars you have access to     |
 | `gcal_list_events`     | List events (supports date range, search) |
-| `gcal_get_event`       | Get full details of a single event        |
+| `gcal_read_event`      | Get full details of a single event        |
 | `gcal_create_event`    | Create a new event (timed or all-day)     |
 | `gcal_update_event`    | Update an existing event                  |
 | `gcal_delete_event`    | Delete an event                           |

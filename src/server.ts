@@ -449,7 +449,7 @@ server.addTool({
 // ============ Google Calendar Tools ============
 
 server.addTool({
-  name: 'gcal_calendars',
+  name: 'gcal_list_calendars',
   description: 'List all calendars the user has access to (owned, subscribed, shared).',
   parameters: z.object({}),
   execute: async () => {
@@ -479,7 +479,7 @@ server.addTool({
       .string()
       .optional()
       .default('primary')
-      .describe('Calendar ID (default: primary). Use gcal_calendars to find IDs.'),
+      .describe('Calendar ID (default: primary). Use gcal_list_calendars to find IDs.'),
     timeMin: z
       .string()
       .optional()
@@ -510,7 +510,7 @@ server.addTool({
 })
 
 server.addTool({
-  name: 'gcal_get_event',
+  name: 'gcal_read_event',
   description: 'Get full details of a single calendar event.',
   parameters: z.object({
     calendarId: z.string().optional().default('primary').describe('Calendar ID'),
