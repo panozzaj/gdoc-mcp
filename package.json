@@ -9,7 +9,8 @@
     "start": "node dist/server.js",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "auth": "node dist/auth-cli.js"
   },
   "dependencies": {
     "fastmcp": "^3.24.0",
