@@ -23,6 +23,15 @@ import {
   NotReadError as SheetNotReadError,
   ConcurrentModificationError,
 } from './sheets/concurrency.js'
+import {
+  listCalendars,
+  listEvents,
+  getEvent,
+  createEvent,
+  updateEvent,
+  deleteEvent,
+  quickAdd,
+} from './calendar/client.js'
 
 const server = new FastMCP({
   name: 'gdoc-mcp',
@@ -420,6 +429,226 @@ server.addTool({
         {
           type: 'text' as const,
           text: `Copied spreadsheet as "${result.title}"\nID: ${result.id}\nURL: ${result.url}`,
+        },
+      ],
+    }
+  },
+})
+
+// ============ Google Calendar Tools ============
+
+server.addTool({
+  name: 'gcal_calendars',
+  description: 'List all calendars the user has access to (owned, subscribed, shared).',
+  parameters: z.object({}),
+  execute: async () => {
+    const calendars = await listCalendars()
+    const lines = calendars.map(
+      (c) => `- ${c.summary}${c.primary ? ' (primary)' : ''}\n  ID: ${c.id}`,
+    )
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: lines.length > 0 ? lines.join('\n\n') : 'No calendars found.',
+        },
+      ],
+    }
+  },
+})
+
+server.addTool({
+  name: 'gcal_list_events',
+  description:
+    'List upcoming events from a calendar. ' +
+    'Returns events sorted by start time. ' +
+    'Use timeMin/timeMax to query a specific date range.',
+  parameters: z.object({
+    calendarId: z
+      .string()
+      .optional()
+      .default('primary')
+      .describe('Calendar ID (default: primary). Use gcal_calendars to find IDs.'),
+    timeMin: z
+      .string()
+      .optional()
+      .describe(
+        'Start of time range (ISO 8601, e.g. "2025-01-15T00:00:00-05:00"). Defaults to now.',
+      ),
+    timeMax: z
+      .string()
+      .optional()
+      .describe('End of time range (ISO 8601). Omit to list upcoming events.'),
+    maxResults: z.number().optional().default(10).describe('Max events to return (default: 10)'),
+    query: z.string().optional().describe('Free text search across event fields'),
+  }),
+  execute: async ({ calendarId, timeMin, timeMax, maxResults, query }) => {
+    const events = await listEvents(calendarId, timeMin, timeMax, maxResults, query)
+    if (events.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No events found.' }] }
+    }
+    const lines = events.map((e) => {
+      let line = `- **${e.summary}**\n  ${e.allDay ? 'All day' : `${e.start} → ${e.end}`}`
+      if (e.location) line += `\n  Location: ${e.location}`
+      if (e.meetLink) line += `\n  Meet: ${e.meetLink}`
+      line += `\n  ID: ${e.id}`
+      return line
+    })
+    return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gcal_get_event',
+  description: 'Get full details of a single calendar event.',
+  parameters: z.object({
+    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    eventId: z.string().describe('Event ID'),
+  }),
+  execute: async ({ calendarId, eventId }) => {
+    const e = await getEvent(calendarId, eventId)
+    const parts = [
+      `**${e.summary}**`,
+      e.allDay ? `All day: ${e.start}` : `Start: ${e.start}\nEnd: ${e.end}`,
+    ]
+    if (e.location) parts.push(`Location: ${e.location}`)
+    if (e.description) parts.push(`Description: ${e.description}`)
+    if (e.attendees?.length) parts.push(`Attendees: ${e.attendees.join(', ')}`)
+    if (e.meetLink) parts.push(`Meet: ${e.meetLink}`)
+    if (e.htmlLink) parts.push(`Link: ${e.htmlLink}`)
+    parts.push(`Status: ${e.status || 'confirmed'}`)
+    parts.push(`ID: ${e.id}`)
+    return { content: [{ type: 'text' as const, text: parts.join('\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gcal_create_event',
+  description:
+    'Create a new calendar event. ' +
+    'For all-day events, use date format YYYY-MM-DD. ' +
+    'For timed events, use ISO 8601 datetime.',
+  parameters: z.object({
+    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    summary: z.string().describe('Event title'),
+    start: z.string().describe('Start time (ISO 8601 datetime or YYYY-MM-DD for all-day)'),
+    end: z.string().describe('End time (ISO 8601 datetime or YYYY-MM-DD for all-day)'),
+    description: z.string().optional().describe('Event description'),
+    location: z.string().optional().describe('Event location'),
+    attendees: z.array(z.string()).optional().describe('List of attendee email addresses'),
+    timeZone: z
+      .string()
+      .optional()
+      .describe('Time zone (e.g. "America/New_York"). Defaults to system timezone.'),
+  }),
+  execute: async ({
+    calendarId,
+    summary,
+    start,
+    end,
+    description,
+    location,
+    attendees,
+    timeZone,
+  }) => {
+    const event = await createEvent(calendarId, {
+      summary,
+      start,
+      end,
+      description,
+      location,
+      attendees,
+      timeZone,
+    })
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Created event "${event.summary}"\nStart: ${event.start}\nEnd: ${event.end}\nID: ${event.id}${event.htmlLink ? `\nLink: ${event.htmlLink}` : ''}`,
+        },
+      ],
+    }
+  },
+})
+
+server.addTool({
+  name: 'gcal_update_event',
+  description: 'Update an existing calendar event. Only provided fields are changed.',
+  parameters: z.object({
+    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    eventId: z.string().describe('Event ID'),
+    summary: z.string().optional().describe('New event title'),
+    start: z.string().optional().describe('New start time'),
+    end: z.string().optional().describe('New end time'),
+    description: z.string().optional().describe('New description'),
+    location: z.string().optional().describe('New location'),
+    attendees: z.array(z.string()).optional().describe('New attendee list (replaces existing)'),
+    timeZone: z.string().optional().describe('Time zone for start/end times'),
+  }),
+  execute: async ({
+    calendarId,
+    eventId,
+    summary,
+    start,
+    end,
+    description,
+    location,
+    attendees,
+    timeZone,
+  }) => {
+    const updates: Record<string, unknown> = {}
+    if (summary !== undefined) updates.summary = summary
+    if (start !== undefined) updates.start = start
+    if (end !== undefined) updates.end = end
+    if (description !== undefined) updates.description = description
+    if (location !== undefined) updates.location = location
+    if (attendees !== undefined) updates.attendees = attendees
+    if (timeZone !== undefined) updates.timeZone = timeZone
+
+    const event = await updateEvent(calendarId, eventId, updates)
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Updated event "${event.summary}"\nStart: ${event.start}\nEnd: ${event.end}\nID: ${event.id}`,
+        },
+      ],
+    }
+  },
+})
+
+server.addTool({
+  name: 'gcal_delete_event',
+  description: 'Delete a calendar event.',
+  parameters: z.object({
+    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    eventId: z.string().describe('Event ID to delete'),
+  }),
+  execute: async ({ calendarId, eventId }) => {
+    await deleteEvent(calendarId, eventId)
+    return {
+      content: [{ type: 'text' as const, text: `Deleted event ${eventId}` }],
+    }
+  },
+})
+
+server.addTool({
+  name: 'gcal_quick_add_event',
+  description:
+    'Create an event from natural language text. ' +
+    'Google parses the text to extract date, time, and title. ' +
+    'Example: "Lunch with Bob tomorrow at noon at Cafe Milano"',
+  parameters: z.object({
+    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    text: z.string().describe('Natural language event description'),
+  }),
+  execute: async ({ calendarId, text }) => {
+    const event = await quickAdd(calendarId, text)
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Created event "${event.summary}"\nStart: ${event.start}\nEnd: ${event.end}\nID: ${event.id}`,
         },
       ],
     }
