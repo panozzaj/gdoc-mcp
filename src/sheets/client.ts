@@ -459,6 +459,47 @@ export async function addSheet(
   }
 }
 
+export async function deleteTab(
+  spreadsheetIdOrUrl: string,
+  sheetName: string,
+): Promise<{ success: boolean; message: string }> {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetIdOrUrl)
+  const sheets = await getSheetsClient()
+
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties',
+  })
+
+  const allSheets = meta.data.sheets || []
+  const targetSheet = allSheets.find((s) => s.properties?.title === sheetName)
+  if (!targetSheet) {
+    const available = allSheets.map((s) => s.properties?.title).join(', ')
+    throw new Error(`Tab "${sheetName}" not found. Available: ${available}`)
+  }
+
+  if (allSheets.length === 1) {
+    throw new Error('Cannot delete the only tab in a spreadsheet')
+  }
+
+  const sheetId = targetSheet.properties?.sheetId
+  if (sheetId == null) {
+    throw new Error(`Could not determine sheet ID for "${sheetName}"`)
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{ deleteSheet: { sheetId } }],
+    },
+  })
+
+  return {
+    success: true,
+    message: `Deleted tab "${sheetName}" from spreadsheet`,
+  }
+}
+
 export async function cloneSheet(
   spreadsheetIdOrUrl: string,
   sourceSheetName: string,
