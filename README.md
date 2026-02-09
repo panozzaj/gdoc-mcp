@@ -149,10 +149,10 @@ Add to your Claude MCP config:
 | Tool                             | Description                                  |
 | -------------------------------- | -------------------------------------------- |
 | `gmail_list_messages`            | Search/list emails using Gmail search syntax |
-| `gmail_list_drafts`              | List existing email drafts                   |
 | `gmail_read_message`             | Read full message content by ID              |
 | `gmail_list_message_attachments` | List attachments on a message                |
 | `gmail_save_attachment`          | Save an attachment to a local file           |
+| `gmail_list_drafts`              | List existing email drafts                   |
 | `gmail_create_draft`             | Create a new draft with optional attachments |
 | `gmail_create_reply_draft`       | Create a threaded reply draft (not sent)     |
 | `gmail_update_draft`             | Update an existing draft                     |

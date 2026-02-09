@@ -100,40 +100,6 @@ server.addTool({
   },
 })
 
-// Tool: Search within a Google Doc
-server.addTool({
-  name: 'gdoc_search',
-  description:
-    'Search for text in a Google Doc and return matching lines with context. ' +
-    'Useful for finding specific content in long documents without reading the entire doc. ' +
-    'Returns matching lines with surrounding context (like grep -C).',
-  parameters: z.object({
-    docId: z.string().describe('Google Doc ID or full URL'),
-    query: z.string().describe('Text or regex pattern to search for'),
-    context: z
-      .number()
-      .optional()
-      .default(2)
-      .describe('Number of lines of context before and after each match (default: 2)'),
-    maxMatches: z
-      .number()
-      .optional()
-      .default(10)
-      .describe('Maximum number of matches to return (default: 10)'),
-  }),
-  execute: async ({ docId, query, context, maxMatches }) => {
-    const result = await searchDoc(docId, query, context, maxMatches)
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: result,
-        },
-      ],
-    }
-  },
-})
-
 // Tool: Edit a Google Doc
 server.addTool({
   name: 'gdoc_edit',
@@ -171,6 +137,40 @@ server.addTool({
         }
       }
       throw error
+    }
+  },
+})
+
+// Tool: Search within a Google Doc
+server.addTool({
+  name: 'gdoc_search',
+  description:
+    'Search for text in a Google Doc and return matching lines with context. ' +
+    'Useful for finding specific content in long documents without reading the entire doc. ' +
+    'Returns matching lines with surrounding context (like grep -C).',
+  parameters: z.object({
+    docId: z.string().describe('Google Doc ID or full URL'),
+    query: z.string().describe('Text or regex pattern to search for'),
+    context: z
+      .number()
+      .optional()
+      .default(2)
+      .describe('Number of lines of context before and after each match (default: 2)'),
+    maxMatches: z
+      .number()
+      .optional()
+      .default(10)
+      .describe('Maximum number of matches to return (default: 10)'),
+  }),
+  execute: async ({ docId, query, context, maxMatches }) => {
+    const result = await searchDoc(docId, query, context, maxMatches)
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: result,
+        },
+      ],
     }
   },
 })
@@ -762,6 +762,45 @@ server.addTool({
 })
 
 server.addTool({
+  name: 'gmail_list_message_attachments',
+  description:
+    'List attachments on an email message. Returns filenames, MIME types, sizes, and attachment IDs ' +
+    'for use with gmail_save_attachment.',
+  parameters: z.object({
+    messageId: z.string().describe('Message ID (from gmail_list_messages or gmail_read_message)'),
+  }),
+  execute: async ({ messageId }) => {
+    const attachmentsList = await listAttachments(messageId)
+    if (attachmentsList.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No attachments found.' }] }
+    }
+    const lines = attachmentsList.map(
+      (a) =>
+        `- **${a.filename}**\n  Type: ${a.mimeType}\n  Size: ${a.size} bytes\n  Attachment ID: ${a.attachmentId}`,
+    )
+    return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] }
+  },
+})
+
+server.addTool({
+  name: 'gmail_save_attachment',
+  description:
+    'Download and save an email attachment to a local file. ' +
+    'Use gmail_list_message_attachments to get attachment IDs.',
+  parameters: z.object({
+    messageId: z.string().describe('Message ID the attachment belongs to'),
+    attachmentId: z.string().describe('Attachment ID (from gmail_list_attachments)'),
+    savePath: z.string().describe('Local file path to save the attachment to'),
+  }),
+  execute: async ({ messageId, attachmentId, savePath }) => {
+    const savedTo = await saveAttachment(messageId, attachmentId, savePath)
+    return {
+      content: [{ type: 'text' as const, text: `Attachment saved to: ${savedTo}` }],
+    }
+  },
+})
+
+server.addTool({
   name: 'gmail_list_drafts',
   description: 'List existing email drafts. Returns draft IDs, subjects, and recipients.',
   parameters: z.object({
@@ -874,45 +913,6 @@ server.addTool({
       parts.push(`Link: https://mail.google.com/mail/#drafts/${draft.messageId}`)
     }
     return { content: [{ type: 'text' as const, text: parts.join('\n') }] }
-  },
-})
-
-server.addTool({
-  name: 'gmail_list_message_attachments',
-  description:
-    'List attachments on an email message. Returns filenames, MIME types, sizes, and attachment IDs ' +
-    'for use with gmail_save_attachment.',
-  parameters: z.object({
-    messageId: z.string().describe('Message ID (from gmail_list_messages or gmail_read_message)'),
-  }),
-  execute: async ({ messageId }) => {
-    const attachmentsList = await listAttachments(messageId)
-    if (attachmentsList.length === 0) {
-      return { content: [{ type: 'text' as const, text: 'No attachments found.' }] }
-    }
-    const lines = attachmentsList.map(
-      (a) =>
-        `- **${a.filename}**\n  Type: ${a.mimeType}\n  Size: ${a.size} bytes\n  Attachment ID: ${a.attachmentId}`,
-    )
-    return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] }
-  },
-})
-
-server.addTool({
-  name: 'gmail_save_attachment',
-  description:
-    'Download and save an email attachment to a local file. ' +
-    'Use gmail_list_message_attachments to get attachment IDs.',
-  parameters: z.object({
-    messageId: z.string().describe('Message ID the attachment belongs to'),
-    attachmentId: z.string().describe('Attachment ID (from gmail_list_attachments)'),
-    savePath: z.string().describe('Local file path to save the attachment to'),
-  }),
-  execute: async ({ messageId, attachmentId, savePath }) => {
-    const savedTo = await saveAttachment(messageId, attachmentId, savePath)
-    return {
-      content: [{ type: 'text' as const, text: `Attachment saved to: ${savedTo}` }],
-    }
   },
 })
 
