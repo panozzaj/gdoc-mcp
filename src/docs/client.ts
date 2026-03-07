@@ -139,7 +139,108 @@ export async function editDoc(
   const response = await docs.documents.get({ documentId: docId })
   const doc = response.data
 
-  // 3. Check if old_text is a markdown table (table-to-table replacement)
+  // 3. Append mode: empty old_text means insert at end of document
+  if (!oldText) {
+    const body = doc.body?.content || []
+    const lastElement = body[body.length - 1]
+    const endIndex = lastElement?.endIndex || 1
+    const insertionIndex = endIndex - 1 // Before the trailing newline
+    const isEmptyDoc = insertionIndex <= 1
+
+    // Handle markdown table append
+    if (isMarkdownTable(newText)) {
+      const tableData = parseMarkdownTable(newText)
+      if (tableData) {
+        const numRows = tableData.rows.length + 1
+        const numColumns = tableData.headers.length
+
+        const requests: object[] = []
+        let tableInsertIndex = insertionIndex
+        if (!isEmptyDoc) {
+          requests.push({
+            insertText: { location: { index: insertionIndex }, text: '\n' },
+          })
+          tableInsertIndex = insertionIndex + 1
+        }
+        requests.push(buildInsertTableRequest(tableInsertIndex, numRows, numColumns))
+
+        await docs.documents.batchUpdate({
+          documentId: docId,
+          requestBody: { requests },
+        })
+
+        // Fill in cell content
+        const updatedDoc = await docs.documents.get({ documentId: docId })
+        const updatedBody = updatedDoc.data.body?.content || []
+        const tableElement = updatedBody.find(
+          (el: any) => el.table && el.startIndex !== undefined && el.startIndex >= insertionIndex,
+        )
+
+        if (tableElement?.table) {
+          const cellRequests: object[] = []
+          const tableRows = tableElement.table.tableRows || []
+          const allRows = [tableData.headers, ...tableData.rows]
+          for (let rowIdx = 0; rowIdx < tableRows.length && rowIdx < allRows.length; rowIdx++) {
+            const cells = tableRows[rowIdx].tableCells || []
+            const rowData = allRows[rowIdx]
+            for (let colIdx = 0; colIdx < cells.length && colIdx < rowData.length; colIdx++) {
+              const cell = cells[colIdx]
+              const cellContent = cell.content?.[0]
+              if (cellContent?.startIndex !== undefined && rowData[colIdx]) {
+                cellRequests.push({
+                  insertText: {
+                    location: { index: cellContent.startIndex },
+                    text: rowData[colIdx],
+                  },
+                })
+              }
+            }
+          }
+          if (cellRequests.length > 0) {
+            cellRequests.sort(
+              (a: any, b: any) => b.insertText.location.index - a.insertText.location.index,
+            )
+            await docs.documents.batchUpdate({
+              documentId: docId,
+              requestBody: { requests: cellRequests },
+            })
+          }
+        }
+
+        const finalDoc = await docs.documents.get({ documentId: docId })
+        setCachedRevision(docId, finalDoc.data.revisionId || '')
+        return { success: true, message: `Appended table to document.` }
+      }
+    }
+
+    // Handle text/markdown append
+    const parsed = parseMarkdown(newText)
+    const insertText = isEmptyDoc ? parsed.rawText : '\n' + parsed.rawText
+    const requests: object[] = [
+      { insertText: { location: { index: insertionIndex }, text: insertText } },
+    ]
+
+    const formatOffset = insertionIndex + (isEmptyDoc ? 0 : 1)
+    let currentIndex = formatOffset
+    for (const segment of parsed.segments) {
+      const segmentEnd = currentIndex + segment.text.length
+      const formatRequests = buildFormattingRequests(currentIndex, segmentEnd, segment.formatting)
+      requests.push(...formatRequests)
+      currentIndex = segmentEnd
+    }
+
+    await docs.documents.batchUpdate({
+      documentId: docId,
+      requestBody: { requests },
+    })
+
+    const updated = await docs.documents.get({ documentId: docId })
+    setCachedRevision(docId, updated.data.revisionId || '')
+    const diff = generateDiff('', newText)
+    return { success: true, message: diff.formatted }
+  }
+
+  // 4. Check if old_text is a markdown table (table-to-table replacement)
   if (isMarkdownTable(oldText)) {
     const tableRange = findTableRange(doc, oldText)
     if (!tableRange) {

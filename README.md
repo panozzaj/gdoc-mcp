@@ -89,6 +89,39 @@ This opens your browser for Google OAuth consent, then saves tokens to `~/.confi
 
 Tokens auto-refresh. You only need to re-run `npm run auth` if you revoke access or the refresh token expires.
 
+### Troubleshooting: "API has not been used in project" or "is disabled"
+
+If you see errors like:
+
+```
+Google Docs API has not been used in project 454715852682 before or it is disabled.
+```
+
+The required Google APIs have been disabled on the GCP project. Re-enable them with gcloud CLI:
+
+```bash
+gcloud services enable \
+  docs.googleapis.com \
+  drive.googleapis.com \
+  sheets.googleapis.com \
+  calendar-json.googleapis.com \
+  gmail.googleapis.com \
+  --project=panozzaj-general
+```
+
+Or enable them individually in the [Google Cloud Console](https://console.cloud.google.com/apis/library?project=panozzaj-general).
+
+After re-enabling, the MCP server should work immediately (no restart needed). If you also had to re-run `npm run auth`, you'll need to restart the MCP server (e.g., `/reload` in Claude Code) so it picks up the new tokens.
+
+### Troubleshooting: "OAuth tokens have expired or been revoked"
+
+```bash
+cd ~/Documents/dev/gdoc-mcp
+npm run auth    # Opens browser for OAuth consent
+```
+
+Then restart the MCP server (`/reload` in Claude Code) so it loads the new tokens from `~/.config/gdoc-mcp/tokens.json`.
+
 ## Configuration
 
 Add to your Claude MCP config:
@@ -108,15 +141,15 @@ Add to your Claude MCP config:
 
 ### Google Docs
 
-| Tool          | Description                                       |
-| ------------- | ------------------------------------------------- |
-| `gdoc_read`   | Read a Google Doc as markdown                     |
-| `gdoc_edit`   | Replace text using markdown (requires read first) |
-| `gdoc_search` | Search doc content with regex                     |
-| `gdoc_list`   | List recent Google Docs                           |
-| `gdoc_info`   | Get document metadata                             |
-| `gdoc_create` | Create a new blank doc                            |
-| `gdoc_copy`   | Copy an existing doc                              |
+| Tool          | Description                                                                      |
+| ------------- | -------------------------------------------------------------------------------- |
+| `gdoc_read`   | Read a Google Doc as markdown                                                    |
+| `gdoc_edit`   | Replace text using markdown, or append with empty old_text (requires read first) |
+| `gdoc_search` | Search doc content with regex                                                    |
+| `gdoc_list`   | List recent Google Docs                                                          |
+| `gdoc_info`   | Get document metadata                                                            |
+| `gdoc_create` | Create a new blank doc                                                           |
+| `gdoc_copy`   | Copy an existing doc                                                             |
 
 ### Google Sheets
 

@@ -109,13 +109,14 @@ server.addTool({
     'old_text is matched by raw text (e.g., "[Click](url)" matches "Click" in doc). ' +
     'new_text formatting is applied to the replacement. ' +
     'Fails if old_text matches multiple locations (provide more context to disambiguate). ' +
+    'To append text (e.g. to an empty doc), pass old_text as empty string "". ' +
     'NOT SUPPORTED: headings, images, colors, fonts.',
   parameters: z.object({
     docId: z.string().describe('Google Doc ID or full URL'),
     old_text: z
       .string()
       .describe(
-        'Text to find (markdown supported). Matched by raw text content. Must be unique in document.',
+        'Text to find (markdown supported). Matched by raw text content. Must be unique in document. Use empty string "" to append to end of document.',
       ),
     new_text: z
       .string()
