@@ -85,6 +85,22 @@ export async function listCalendars(): Promise<CalendarInfo[]> {
   }))
 }
 
+// Check if an all-day event's date range overlaps with the query date range.
+// All-day events use date-only strings (YYYY-MM-DD) with exclusive end dates.
+// Google's API can return all-day events outside the intended range when timezone
+// offsets shift the UTC boundaries (e.g., querying Sunday EST returns Monday's event).
+function isAllDayEventInRange(event: EventInfo, timeMin?: string, timeMax?: string): boolean {
+  if (timeMax) {
+    const maxDate = timeMax.substring(0, 10)
+    if (event.start >= maxDate) return false
+  }
+  if (timeMin) {
+    const minDate = timeMin.substring(0, 10)
+    if (event.end <= minDate) return false
+  }
+  return true
+}
+
 export async function listEvents(
   calendarId: string = 'primary',
   timeMin?: string,
@@ -108,7 +124,10 @@ export async function listEvents(
   const response = await calendar.events.list(params)
   const events = response.data.items || []
 
-  return events.map(parseEvent)
+  return events.map(parseEvent).filter((event) => {
+    if (!event.allDay) return true
+    return isAllDayEventInRange(event, timeMin, timeMax)
+  })
 }
 
 export async function getEvent(

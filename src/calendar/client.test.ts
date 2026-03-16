@@ -191,6 +191,88 @@ describe('Google Calendar Client', () => {
       expect(result[0].start).toBe('2025-06-15')
     })
 
+    it('filters out all-day events that bleed across timezone boundaries', async () => {
+      // Simulates: querying Sunday 3/15 in EST, but Google returns Monday 3/16 all-day event
+      // because timeMax "2025-03-16T00:00:00-05:00" = "2025-03-16T05:00:00Z" which is after
+      // the all-day event's UTC start of "2025-03-16T00:00:00Z"
+      mockCalendarClient.events.list.mockResolvedValue({
+        data: {
+          items: [
+            createMockEvent({
+              id: 'sunday-event',
+              summary: 'Sunday Event',
+              start: { date: '2025-03-15' },
+              end: { date: '2025-03-16' },
+            }),
+            createMockEvent({
+              id: 'monday-event',
+              summary: 'Monday Event',
+              start: { date: '2025-03-16' },
+              end: { date: '2025-03-17' },
+            }),
+          ],
+        },
+      })
+
+      const result = await listEvents(
+        'primary',
+        '2025-03-15T00:00:00-05:00',
+        '2025-03-16T00:00:00-05:00',
+      )
+
+      expect(result).toHaveLength(1)
+      expect(result[0].id).toBe('sunday-event')
+    })
+
+    it('includes multi-day all-day events that overlap the query range', async () => {
+      mockCalendarClient.events.list.mockResolvedValue({
+        data: {
+          items: [
+            createMockEvent({
+              id: 'multi-day',
+              summary: 'Conference',
+              start: { date: '2025-03-15' },
+              end: { date: '2025-03-18' },
+            }),
+          ],
+        },
+      })
+
+      // Query for Tuesday 3/17 — the multi-day event (3/15–3/18) should still appear
+      const result = await listEvents(
+        'primary',
+        '2025-03-17T00:00:00-05:00',
+        '2025-03-18T00:00:00-05:00',
+      )
+
+      expect(result).toHaveLength(1)
+      expect(result[0].id).toBe('multi-day')
+    })
+
+    it('does not filter timed events', async () => {
+      // Timed events have precise timestamps so the API range is already correct
+      mockCalendarClient.events.list.mockResolvedValue({
+        data: {
+          items: [
+            createMockEvent({
+              id: 'timed',
+              start: { dateTime: '2025-03-15T22:00:00-05:00' },
+              end: { dateTime: '2025-03-15T23:00:00-05:00' },
+            }),
+          ],
+        },
+      })
+
+      const result = await listEvents(
+        'primary',
+        '2025-03-15T00:00:00-05:00',
+        '2025-03-16T00:00:00-05:00',
+      )
+
+      expect(result).toHaveLength(1)
+      expect(result[0].id).toBe('timed')
+    })
+
     it('extracts meet link from hangoutLink', async () => {
       mockCalendarClient.events.list.mockResolvedValue({
         data: {
