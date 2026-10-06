@@ -23,9 +23,13 @@ An MCP server that lets Claude read and edit Google Docs, Sheets, Calendar, and 
 **Google Calendar**
 
 - List all calendars you have access to (owned, shared, subscribed)
-- List events with date range and search filtering
-- Create, update, and delete events
-- All-day and timed events
+- List events with date range and search filtering, across several calendars at once
+- Flag possible duplicate events across calendars
+- Create, update, delete, and move events between calendars
+- All-day and timed events (including switching between them)
+- Recurring events: create/edit RRULEs, edit or delete one/following/all occurrences, end a series on a date
+- Refer to calendars by display name (e.g. "Family") or ID
+- Batch several operations in one call
 - Natural language event creation (e.g. "Lunch tomorrow at noon")
 
 **Gmail**
@@ -167,15 +171,19 @@ Add to your Claude MCP config:
 
 ### Google Calendar
 
-| Tool                   | Description                               |
-| ---------------------- | ----------------------------------------- |
-| `gcal_list_calendars`  | List all calendars you have access to     |
-| `gcal_list_events`     | List events (supports date range, search) |
-| `gcal_read_event`      | Get full details of a single event        |
-| `gcal_create_event`    | Create a new event (timed or all-day)     |
-| `gcal_update_event`    | Update an existing event                  |
-| `gcal_delete_event`    | Delete an event                           |
-| `gcal_quick_add_event` | Create event from natural language        |
+| Tool                   | Description                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `gcal_list_calendars`  | List all calendars you have access to                                         |
+| `gcal_list_events`     | List events (date range, search, multiple calendars, duplicate detection)     |
+| `gcal_read_event`      | Get full details of a single event                                            |
+| `gcal_create_event`    | Create a new event (timed or all-day, optionally recurring)                   |
+| `gcal_update_event`    | Update an event (recurrence scope: instance/following/all, `recurrenceUntil`) |
+| `gcal_delete_event`    | Delete an event (recurrence scope: instance/following/all)                    |
+| `gcal_move_event`      | Move an event or whole recurring series to another calendar                   |
+| `gcal_quick_add_event` | Create event from natural language                                            |
+| `gcal_batch`           | Run create/update/delete/move operations in order; failures don't abort       |
+
+Anywhere a `calendarId` is accepted you can pass a calendar's display name (case-insensitive).
 
 ### Gmail
 

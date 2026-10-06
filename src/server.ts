@@ -37,6 +37,7 @@ import {
   listEventsAcross,
 } from './calendar/client.js'
 import { findDuplicateGroups, formatDuplicates } from './calendar/duplicates.js'
+import { runBatch } from './calendar/batch.js'
 import { formatEventListItem, formatEventDetail, formatEventResult } from './calendar/format.js'
 import {
   listMessages,
@@ -749,6 +750,66 @@ server.addTool({
         },
       ],
     }
+  },
+})
+
+const batchEventFields = {
+  description: z.string().optional(),
+  location: z.string().optional(),
+  attendees: z.array(z.string()).optional(),
+  timeZone: z.string().optional(),
+  recurrence: recurrenceParam,
+}
+
+server.addTool({
+  name: 'gcal_batch',
+  description:
+    'Run several calendar operations in order (create, update, delete, move), with the same ' +
+    'parameters as the individual gcal_* tools plus an "op" field. Operations run sequentially; ' +
+    'a failure is reported and the remaining operations still run.',
+  parameters: z.object({
+    operations: z
+      .array(
+        z.discriminatedUnion('op', [
+          z.object({
+            op: z.literal('create'),
+            calendarId: z.string().optional(),
+            summary: z.string(),
+            start: z.string(),
+            end: z.string(),
+            ...batchEventFields,
+          }),
+          z.object({
+            op: z.literal('update'),
+            calendarId: z.string().optional(),
+            eventId: z.string(),
+            summary: z.string().optional(),
+            start: z.string().optional(),
+            end: z.string().optional(),
+            scope: scopeParam,
+            recurrenceUntil: z.string().optional(),
+            ...batchEventFields,
+          }),
+          z.object({
+            op: z.literal('delete'),
+            calendarId: z.string().optional(),
+            eventId: z.string(),
+            scope: scopeParam,
+          }),
+          z.object({
+            op: z.literal('move'),
+            calendarId: z.string().optional(),
+            eventId: z.string(),
+            destinationCalendarId: z.string(),
+          }),
+        ]),
+      )
+      .min(1)
+      .describe('Operations to run in order. calendarId accepts IDs or names (default primary).'),
+  }),
+  execute: async ({ operations }) => {
+    const result = await runBatch(operations)
+    return { content: [{ type: 'text' as const, text: result.text }] }
   },
 })
 
