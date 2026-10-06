@@ -790,6 +790,219 @@ describe('Google Calendar Client', () => {
     })
   })
 
+  describe('recurrence', () => {
+    const master = createMockEvent({
+      id: 'series1',
+      summary: 'Swim',
+      start: { dateTime: '2026-10-07T18:00:00-04:00', timeZone: 'America/New_York' },
+      end: { dateTime: '2026-10-07T19:00:00-04:00', timeZone: 'America/New_York' },
+      recurrence: ['RRULE:FREQ=WEEKLY;BYDAY=WE;COUNT=20'],
+      iCalUID: 'series1@google.com',
+      etag: '"abc"',
+    })
+    const instance = createMockEvent({
+      id: 'series1_20261021T220000Z',
+      summary: 'Swim',
+      start: { dateTime: '2026-10-21T18:00:00-04:00', timeZone: 'America/New_York' },
+      end: { dateTime: '2026-10-21T19:00:00-04:00', timeZone: 'America/New_York' },
+      recurringEventId: 'series1',
+      originalStartTime: { dateTime: '2026-10-21T18:00:00-04:00' },
+    })
+
+    function mockGet() {
+      mockCalendarClient.events.get.mockImplementation(async ({ eventId }) => ({
+        data: eventId === 'series1' ? master : instance,
+      }))
+      mockCalendarClient.events.update.mockImplementation(async ({ requestBody }) => ({
+        data: requestBody,
+      }))
+      mockCalendarClient.events.insert.mockImplementation(async ({ requestBody }) => ({
+        data: { ...requestBody, id: 'series2' },
+      }))
+      mockCalendarClient.events.delete.mockResolvedValue({})
+    }
+
+    it('creates a recurring event', async () => {
+      mockCalendarClient.events.insert.mockResolvedValue({ data: createMockEvent() })
+
+      await createEvent('primary', {
+        summary: 'Swim',
+        start: '2026-10-07T18:00:00-04:00',
+        end: '2026-10-07T19:00:00-04:00',
+        recurrence: ['RRULE:FREQ=WEEKLY;BYDAY=WE'],
+      })
+
+      expect(mockCalendarClient.events.insert.mock.calls[0][0].requestBody.recurrence).toEqual([
+        'RRULE:FREQ=WEEKLY;BYDAY=WE',
+      ])
+    })
+
+    it('updates recurrence on an event', async () => {
+      mockGet()
+      await updateEvent('primary', 'series1', { recurrence: ['RRULE:FREQ=DAILY'] })
+      expect(mockCalendarClient.events.update.mock.calls[0][0].requestBody.recurrence).toEqual([
+        'RRULE:FREQ=DAILY',
+      ])
+    })
+
+    it("scope 'instance' (default) updates just the passed ID", async () => {
+      mockGet()
+      await updateEvent('primary', 'series1_20261021T220000Z', { summary: 'Moved swim' })
+      const call = mockCalendarClient.events.update.mock.calls[0][0]
+      expect(call.eventId).toBe('series1_20261021T220000Z')
+      expect(call.requestBody.summary).toBe('Moved swim')
+    })
+
+    it("scope 'all' on an instance updates the series master", async () => {
+      mockGet()
+      await updateEvent(
+        'primary',
+        'series1_20261021T220000Z',
+        { summary: 'Swim practice' },
+        { scope: 'all' },
+      )
+      expect(mockCalendarClient.events.update).toHaveBeenCalledTimes(1)
+      const call = mockCalendarClient.events.update.mock.calls[0][0]
+      expect(call.eventId).toBe('series1')
+      expect(call.requestBody.summary).toBe('Swim practice')
+      expect(call.requestBody.recurrence).toEqual(['RRULE:FREQ=WEEKLY;BYDAY=WE;COUNT=20'])
+    })
+
+    it("scope 'following' splits the series at the instance", async () => {
+      mockGet()
+      const result = await updateEvent(
+        'primary',
+        'series1_20261021T220000Z',
+        { summary: 'Swim (new pool)', location: 'New pool' },
+        { scope: 'following' },
+      )
+
+      // Master capped just before the instance (UTC), COUNT replaced
+      const capped = mockCalendarClient.events.update.mock.calls[0][0]
+      expect(capped.eventId).toBe('series1')
+      expect(capped.requestBody.recurrence).toEqual([
+        'RRULE:FREQ=WEEKLY;BYDAY=WE;UNTIL=20261021T215959Z',
+      ])
+      expect(capped.requestBody.summary).toBe('Swim')
+
+      // New series starts at the instance with updated fields
+      const created = mockCalendarClient.events.insert.mock.calls[0][0].requestBody
+      expect(created.summary).toBe('Swim (new pool)')
+      expect(created.location).toBe('New pool')
+      expect(created.start).toEqual({
+        dateTime: '2026-10-21T18:00:00-04:00',
+        timeZone: 'America/New_York',
+      })
+      expect(created.end).toEqual({
+        dateTime: '2026-10-21T19:00:00-04:00',
+        timeZone: 'America/New_York',
+      })
+      expect(created.recurrence).toEqual(['RRULE:FREQ=WEEKLY;BYDAY=WE'])
+      expect(created.id).toBeUndefined()
+      expect(created.iCalUID).toBeUndefined()
+      expect(created.recurringEventId).toBeUndefined()
+
+      expect(result.id).toBe('series2')
+      expect(result.note).toMatch(/series1.*series2/s)
+    })
+
+    it("scope 'following' on an all-day instance uses date-form UNTIL", async () => {
+      const allDayMaster = createMockEvent({
+        id: 'series1',
+        start: { date: '2026-10-01' },
+        end: { date: '2026-10-02' },
+        recurrence: ['RRULE:FREQ=DAILY'],
+      })
+      const allDayInstance = createMockEvent({
+        id: 'series1_20261010',
+        start: { date: '2026-10-10' },
+        end: { date: '2026-10-11' },
+        recurringEventId: 'series1',
+        originalStartTime: { date: '2026-10-10' },
+      })
+      mockGet()
+      mockCalendarClient.events.get.mockImplementation(async ({ eventId }) => ({
+        data: eventId === 'series1' ? allDayMaster : allDayInstance,
+      }))
+
+      await updateEvent('primary', 'series1_20261010', { summary: 'x' }, { scope: 'following' })
+
+      expect(mockCalendarClient.events.update.mock.calls[0][0].requestBody.recurrence).toEqual([
+        'RRULE:FREQ=DAILY;UNTIL=20261009',
+      ])
+      expect(mockCalendarClient.events.insert.mock.calls[0][0].requestBody.start).toEqual({
+        date: '2026-10-10',
+      })
+    })
+
+    it('recurrenceUntil ends the series on a date (resolving instance to master)', async () => {
+      mockGet()
+      await updateEvent(
+        'primary',
+        'series1_20261021T220000Z',
+        {},
+        { recurrenceUntil: '2026-12-16' },
+      )
+      const call = mockCalendarClient.events.update.mock.calls[0][0]
+      expect(call.eventId).toBe('series1')
+      // 23:59:59 EST on 12/16 = 04:59:59Z on 12/17
+      expect(call.requestBody.recurrence).toEqual([
+        'RRULE:FREQ=WEEKLY;BYDAY=WE;UNTIL=20261217T045959Z',
+      ])
+    })
+
+    it('recurrenceUntil rejects non-recurring events', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({ data: createMockEvent() })
+      await expect(
+        updateEvent('primary', 'event-1', {}, { recurrenceUntil: '2026-12-16' }),
+      ).rejects.toThrow(/not a recurring/)
+    })
+
+    it("delete scope 'instance' (default) deletes only the passed ID", async () => {
+      mockGet()
+      await deleteEvent('primary', 'series1_20261021T220000Z')
+      expect(mockCalendarClient.events.delete).toHaveBeenCalledWith({
+        calendarId: 'primary',
+        eventId: 'series1_20261021T220000Z',
+      })
+    })
+
+    it("delete scope 'all' on an instance deletes the master", async () => {
+      mockGet()
+      const message = await deleteEvent('primary', 'series1_20261021T220000Z', 'all')
+      expect(mockCalendarClient.events.delete).toHaveBeenCalledWith({
+        calendarId: 'primary',
+        eventId: 'series1',
+      })
+      expect(message).toMatch(/series1/)
+    })
+
+    it("delete scope 'following' caps the master with UNTIL", async () => {
+      mockGet()
+      const message = await deleteEvent('primary', 'series1_20261021T220000Z', 'following')
+      expect(mockCalendarClient.events.delete).not.toHaveBeenCalled()
+      const call = mockCalendarClient.events.update.mock.calls[0][0]
+      expect(call.eventId).toBe('series1')
+      expect(call.requestBody.recurrence).toEqual([
+        'RRULE:FREQ=WEEKLY;BYDAY=WE;UNTIL=20261021T215959Z',
+      ])
+      expect(message).toMatch(/ends before/)
+    })
+
+    it("delete scope 'following' on the first instance deletes the whole series", async () => {
+      const first = { ...instance, originalStartTime: { dateTime: '2026-10-07T18:00:00-04:00' } }
+      mockGet()
+      mockCalendarClient.events.get.mockImplementation(async ({ eventId }) => ({
+        data: eventId === 'series1' ? master : first,
+      }))
+      await deleteEvent('primary', 'series1_20261007T220000Z', 'following')
+      expect(mockCalendarClient.events.delete).toHaveBeenCalledWith({
+        calendarId: 'primary',
+        eventId: 'series1',
+      })
+    })
+  })
+
   describe('quickAdd', () => {
     it('creates event from natural language', async () => {
       mockCalendarClient.events.quickAdd.mockResolvedValue({

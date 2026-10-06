@@ -56,5 +56,6 @@ export function formatEventResult(verb: string, e: EventInfo): string {
   lines.push(...recurrenceLines(e))
   lines.push(`ID: ${e.id}`)
   if (e.htmlLink) lines.push(`Link: ${e.htmlLink}`)
+  if (e.note) lines.push(`Note: ${e.note}`)
   return lines.join('\n')
 }

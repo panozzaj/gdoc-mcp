@@ -1,5 +1,11 @@
 import { getCalendarClient } from '../auth.js'
 import { calendar_v3 } from 'googleapis'
+import {
+  setRecurrenceUntil,
+  stripRecurrenceCount,
+  untilBeforeInstance,
+  untilOnDate,
+} from './recurrence.js'
 
 // Detect system timezone, fallback to UTC
 function getDefaultTimeZone(): string {
@@ -32,6 +38,8 @@ export interface EventInfo {
   recurringEventId?: string
   calendarId?: string
   calendarName?: string
+  // Explanation of non-obvious side effects (e.g. series split)
+  note?: string
 }
 
 export interface EventInput {
@@ -42,6 +50,7 @@ export interface EventInput {
   location?: string
   attendees?: string[]
   timeZone?: string
+  recurrence?: string[]
 }
 
 function isAllDayDate(dateStr: string): boolean {
@@ -242,6 +251,7 @@ export async function createEvent(
   if (event.attendees) {
     requestBody.attendees = event.attendees.map((email) => ({ email }))
   }
+  if (event.recurrence?.length) requestBody.recurrence = event.recurrence
 
   const response = await calendar.events.insert({
     calendarId,
@@ -251,18 +261,20 @@ export async function createEvent(
   return tagEvent(parseEvent(response.data), calendarId)
 }
 
-export async function updateEvent(
-  calendarIdOrName: string = 'primary',
-  eventId: string,
-  updates: Partial<EventInput>,
-): Promise<EventInfo> {
-  const calendarId = await resolveCalendarId(calendarIdOrName)
-  const calendar = await getCalendarClient()
-  const timeZone = updates.timeZone || getDefaultTimeZone()
+export type RecurrenceScope = 'instance' | 'following' | 'all'
 
-  // Fetch the existing event first
-  const existing = await calendar.events.get({ calendarId, eventId })
-  const requestBody: calendar_v3.Schema$Event = { ...existing.data }
+export interface UpdateOptions {
+  // Which occurrences of a recurring event to change (default 'instance': just the passed ID)
+  scope?: RecurrenceScope
+  // End the series on this date (YYYY-MM-DD, inclusive). Applies to the series master.
+  recurrenceUntil?: string
+}
+
+function applyUpdates(
+  requestBody: calendar_v3.Schema$Event,
+  updates: Partial<EventInput>,
+): calendar_v3.Schema$Event {
+  const timeZone = updates.timeZone || getDefaultTimeZone()
 
   if (updates.summary !== undefined) requestBody.summary = updates.summary
   if (updates.description !== undefined) requestBody.description = updates.description
@@ -282,23 +294,172 @@ export async function updateEvent(
   if (updates.attendees !== undefined) {
     requestBody.attendees = updates.attendees.map((email) => ({ email }))
   }
+  if (updates.recurrence !== undefined) requestBody.recurrence = updates.recurrence
 
-  const response = await calendar.events.update({
-    calendarId,
-    eventId,
-    requestBody,
-  })
-
-  return tagEvent(parseEvent(response.data), calendarId)
+  return requestBody
 }
 
+function sameStart(
+  a: calendar_v3.Schema$EventDateTime | undefined,
+  b: calendar_v3.Schema$EventDateTime | undefined,
+): boolean {
+  if (a?.date || b?.date) return a?.date === b?.date
+  if (!a?.dateTime || !b?.dateTime) return false
+  return new Date(a.dateTime).getTime() === new Date(b.dateTime).getTime()
+}
+
+// Fields that identify or are generated for an existing event and must not be copied
+// into a brand-new event
+const GENERATED_EVENT_FIELDS: (keyof calendar_v3.Schema$Event)[] = [
+  'id',
+  'iCalUID',
+  'etag',
+  'htmlLink',
+  'created',
+  'updated',
+  'sequence',
+  'recurringEventId',
+  'originalStartTime',
+  'hangoutLink',
+  'conferenceData',
+  'creator',
+  'organizer',
+]
+
+async function capSeries(
+  calendar: calendar_v3.Calendar,
+  calendarId: string,
+  master: calendar_v3.Schema$Event,
+  instanceStart: calendar_v3.Schema$EventDateTime,
+): Promise<string> {
+  const until = untilBeforeInstance(instanceStart)
+  await calendar.events.update({
+    calendarId,
+    eventId: master.id || '',
+    requestBody: { ...master, recurrence: setRecurrenceUntil(master.recurrence || [], until) },
+  })
+  return until
+}
+
+export async function updateEvent(
+  calendarIdOrName: string = 'primary',
+  eventId: string,
+  updates: Partial<EventInput>,
+  options: UpdateOptions = {},
+): Promise<EventInfo> {
+  const calendarId = await resolveCalendarId(calendarIdOrName)
+  const calendar = await getCalendarClient()
+  const scope = options.scope || 'instance'
+
+  const existing = (await calendar.events.get({ calendarId, eventId })).data
+  const masterId = existing.recurringEventId
+  const getMaster = async () =>
+    masterId ? (await calendar.events.get({ calendarId, eventId: masterId })).data : existing
+
+  if (options.recurrenceUntil !== undefined) {
+    const master = await getMaster()
+    if (!master.recurrence?.length) {
+      throw new Error(`Event ${eventId} is not a recurring event; recurrenceUntil needs a series`)
+    }
+    const until = untilOnDate(options.recurrenceUntil, master.start || {})
+    const requestBody = applyUpdates({ ...master }, updates)
+    requestBody.recurrence = setRecurrenceUntil(requestBody.recurrence || [], until)
+    const response = await calendar.events.update({
+      calendarId,
+      eventId: master.id || '',
+      requestBody,
+    })
+    return tagEvent(
+      {
+        ...parseEvent(response.data),
+        note: `Series ${master.id} now ends on ${options.recurrenceUntil} (UNTIL=${until}).`,
+      },
+      calendarId,
+    )
+  }
+
+  if (scope === 'instance' || !masterId) {
+    // Non-recurring events, series masters with 'all'/'following', and single instances
+    const response = await calendar.events.update({
+      calendarId,
+      eventId,
+      requestBody: applyUpdates({ ...existing }, updates),
+    })
+    return tagEvent(parseEvent(response.data), calendarId)
+  }
+
+  const master = await getMaster()
+  const instanceStart = existing.originalStartTime || existing.start || {}
+
+  if (scope === 'all' || sameStart(instanceStart, master.start)) {
+    const response = await calendar.events.update({
+      calendarId,
+      eventId: masterId,
+      requestBody: applyUpdates({ ...master }, updates),
+    })
+    return tagEvent(
+      { ...parseEvent(response.data), note: `Updated all events in series ${masterId}.` },
+      calendarId,
+    )
+  }
+
+  // scope 'following': end the original series just before this instance, then start a new
+  // series at this instance carrying the updated fields
+  const until = await capSeries(calendar, calendarId, master, instanceStart)
+  const newSeries: calendar_v3.Schema$Event = { ...master }
+  for (const field of GENERATED_EVENT_FIELDS) delete newSeries[field]
+  newSeries.start = existing.start
+  newSeries.end = existing.end
+  newSeries.recurrence = stripRecurrenceCount(master.recurrence || [])
+  const response = await calendar.events.insert({
+    calendarId,
+    requestBody: applyUpdates(newSeries, updates),
+  })
+  const created = parseEvent(response.data)
+  return tagEvent(
+    {
+      ...created,
+      note:
+        `Split series: original ${masterId} now ends before this instance (UNTIL=${until}); ` +
+        `new series ${created.id} starts here with the changes.`,
+    },
+    calendarId,
+  )
+}
+
+// Returns a human-readable description of what was deleted
 export async function deleteEvent(
   calendarIdOrName: string = 'primary',
   eventId: string,
-): Promise<void> {
+  scope: RecurrenceScope = 'instance',
+): Promise<string> {
   const calendarId = await resolveCalendarId(calendarIdOrName)
   const calendar = await getCalendarClient()
-  await calendar.events.delete({ calendarId, eventId })
+
+  if (scope === 'instance') {
+    await calendar.events.delete({ calendarId, eventId })
+    return `Deleted event ${eventId}`
+  }
+
+  const existing = (await calendar.events.get({ calendarId, eventId })).data
+  const masterId = existing.recurringEventId
+  if (!masterId) {
+    await calendar.events.delete({ calendarId, eventId })
+    return existing.recurrence?.length
+      ? `Deleted recurring series ${eventId}`
+      : `Deleted event ${eventId}`
+  }
+
+  const master = (await calendar.events.get({ calendarId, eventId: masterId })).data
+  const instanceStart = existing.originalStartTime || existing.start || {}
+
+  if (scope === 'all' || sameStart(instanceStart, master.start)) {
+    await calendar.events.delete({ calendarId, eventId: masterId })
+    return `Deleted recurring series ${masterId} (all events)`
+  }
+
+  const until = await capSeries(calendar, calendarId, master, instanceStart)
+  return `Series ${masterId} now ends before ${eventId} (UNTIL=${until}); this and following events removed`
 }
 
 export async function quickAdd(

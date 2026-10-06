@@ -98,3 +98,11 @@ describe('formatEventResult', () => {
     expect(text).toBe('Created event "Test"\nAll day: 2026-10-09\nID: e1\nLink: https://l')
   })
 })
+
+describe('formatEventResult notes', () => {
+  it('appends a note when present', () => {
+    expect(formatEventResult('Updated', ev({ note: 'Split series.' }))).toMatch(
+      /\nNote: Split series\.$/,
+    )
+  })
+})

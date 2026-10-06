@@ -488,6 +488,23 @@ server.addTool({
 
 // ============ Google Calendar Tools ============
 
+const recurrenceParam = z
+  .array(z.string())
+  .optional()
+  .describe(
+    'Recurrence rules (RFC 5545), e.g. ["RRULE:FREQ=WEEKLY;BYDAY=WE;UNTIL=20261218"]. ' +
+      'Also accepts EXDATE/RDATE lines.',
+  )
+
+const scopeParam = z
+  .enum(['instance', 'following', 'all'])
+  .optional()
+  .describe(
+    "For recurring events: 'instance' (default) affects only the given event ID; " +
+      "'all' affects the whole series (instance IDs resolve to the series); " +
+      "'following' affects the given instance and all later ones (splits/caps the series).",
+  )
+
 const calendarIdParam = z
   .string()
   .optional()
@@ -579,6 +596,7 @@ server.addTool({
       .string()
       .optional()
       .describe('Time zone (e.g. "America/New_York"). Defaults to system timezone.'),
+    recurrence: recurrenceParam,
   }),
   execute: async ({
     calendarId,
@@ -589,6 +607,7 @@ server.addTool({
     location,
     attendees,
     timeZone,
+    recurrence,
   }) => {
     const event = await createEvent(calendarId, {
       summary,
@@ -598,6 +617,7 @@ server.addTool({
       location,
       attendees,
       timeZone,
+      recurrence,
     })
     return {
       content: [
@@ -612,61 +632,58 @@ server.addTool({
 
 server.addTool({
   name: 'gcal_update_event',
-  description: 'Update an existing calendar event. Only provided fields are changed.',
+  description:
+    'Update an existing calendar event. Only provided fields are changed. ' +
+    'To switch between all-day and timed, provide both start and end. ' +
+    'For recurring events use scope (instance/following/all); to end a series on a date, ' +
+    'pass recurrenceUntil (works with a series or instance ID).',
   parameters: z.object({
     calendarId: calendarIdParam,
-    eventId: z.string().describe('Event ID'),
+    eventId: z.string().describe('Event ID (instance or series ID)'),
     summary: z.string().optional().describe('New event title'),
-    start: z.string().optional().describe('New start time'),
-    end: z.string().optional().describe('New end time'),
+    start: z.string().optional().describe('New start (ISO 8601 datetime or YYYY-MM-DD all-day)'),
+    end: z
+      .string()
+      .optional()
+      .describe('New end (ISO 8601 datetime or YYYY-MM-DD all-day, exclusive)'),
     description: z.string().optional().describe('New description'),
     location: z.string().optional().describe('New location'),
     attendees: z.array(z.string()).optional().describe('New attendee list (replaces existing)'),
     timeZone: z.string().optional().describe('Time zone for start/end times'),
+    recurrence: recurrenceParam,
+    scope: scopeParam,
+    recurrenceUntil: z
+      .string()
+      .optional()
+      .describe(
+        'End the recurring series on this date (YYYY-MM-DD, inclusive). Replaces any existing ' +
+          'UNTIL/COUNT. Applies to the series even when an instance ID is given.',
+      ),
   }),
-  execute: async ({
-    calendarId,
-    eventId,
-    summary,
-    start,
-    end,
-    description,
-    location,
-    attendees,
-    timeZone,
-  }) => {
+  execute: async ({ calendarId, eventId, scope, recurrenceUntil, ...fields }) => {
     const updates: Record<string, unknown> = {}
-    if (summary !== undefined) updates.summary = summary
-    if (start !== undefined) updates.start = start
-    if (end !== undefined) updates.end = end
-    if (description !== undefined) updates.description = description
-    if (location !== undefined) updates.location = location
-    if (attendees !== undefined) updates.attendees = attendees
-    if (timeZone !== undefined) updates.timeZone = timeZone
-
-    const event = await updateEvent(calendarId, eventId, updates)
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: formatEventResult('Updated', event),
-        },
-      ],
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined) updates[key] = value
     }
+    const event = await updateEvent(calendarId, eventId, updates, { scope, recurrenceUntil })
+    return { content: [{ type: 'text' as const, text: formatEventResult('Updated', event) }] }
   },
 })
 
 server.addTool({
   name: 'gcal_delete_event',
-  description: 'Delete a calendar event.',
+  description:
+    'Delete a calendar event. For recurring events use scope: instance (default), ' +
+    'following (ends the series before this instance), or all (deletes the whole series).',
   parameters: z.object({
     calendarId: calendarIdParam,
     eventId: z.string().describe('Event ID to delete'),
+    scope: scopeParam,
   }),
-  execute: async ({ calendarId, eventId }) => {
-    await deleteEvent(calendarId, eventId)
+  execute: async ({ calendarId, eventId, scope }) => {
+    const message = await deleteEvent(calendarId, eventId, scope)
     return {
-      content: [{ type: 'text' as const, text: `Deleted event ${eventId}` }],
+      content: [{ type: 'text' as const, text: message }],
     }
   },
 })
