@@ -10,6 +10,7 @@ import {
   resolveCalendarId,
   clearCalendarCache,
   moveEvent,
+  listEventsAcross,
 } from './client.js'
 
 vi.mock('../auth.js', () => ({
@@ -418,6 +419,53 @@ describe('Google Calendar Client', () => {
 
       const result = await listEvents()
       expect(result[0].summary).toBe('(no title)')
+    })
+  })
+
+  describe('listEventsAcross', () => {
+    it('merges events from several calendars sorted by start, tagged with names', async () => {
+      mockCalendarClient.calendarList.list.mockResolvedValue({
+        data: {
+          items: [
+            { id: 'fam@group.calendar.google.com', summary: 'Family' },
+            { id: 'kids@group.calendar.google.com', summary: 'Childcare' },
+          ],
+        },
+      })
+      mockCalendarClient.events.list.mockImplementation(async ({ calendarId }) => ({
+        data: {
+          items:
+            calendarId === 'fam@group.calendar.google.com'
+              ? [
+                  createMockEvent({
+                    id: 'late',
+                    start: { dateTime: '2026-10-09T15:00:00-04:00' },
+                    end: { dateTime: '2026-10-09T16:00:00-04:00' },
+                  }),
+                ]
+              : [
+                  createMockEvent({
+                    id: 'allday',
+                    start: { date: '2026-10-09' },
+                    end: { date: '2026-10-10' },
+                  }),
+                  createMockEvent({
+                    id: 'early',
+                    start: { dateTime: '2026-10-09T09:00:00-04:00' },
+                    end: { dateTime: '2026-10-09T10:00:00-04:00' },
+                  }),
+                ],
+        },
+      }))
+
+      const result = await listEventsAcross(
+        ['Family', 'Childcare'],
+        '2026-10-09T00:00:00-04:00',
+        '2026-10-10T00:00:00-04:00',
+      )
+
+      expect(result.map((e) => e.id)).toEqual(['allday', 'early', 'late'])
+      expect(result.map((e) => e.calendarName)).toEqual(['Childcare', 'Childcare', 'Family'])
     })
   })
 

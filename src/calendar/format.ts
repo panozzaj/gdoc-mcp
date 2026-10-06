@@ -59,3 +59,11 @@ export function formatEventResult(verb: string, e: EventInfo): string {
   if (e.note) lines.push(`Note: ${e.note}`)
   return lines.join('\n')
 }
+
+// Start/end in epoch ms. All-day dates are interpreted as local midnight so they compare
+// sensibly against timed events on the same day.
+export function eventTimeRange(e: EventInfo): { start: number; end: number } {
+  const toMs = (v: string) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00`).getTime() : new Date(v).getTime()
+  return { start: toMs(e.start), end: toMs(e.end) }
+}

@@ -34,7 +34,9 @@ import {
   deleteEvent,
   quickAdd,
   moveEvent,
+  listEventsAcross,
 } from './calendar/client.js'
+import { findDuplicateGroups, formatDuplicates } from './calendar/duplicates.js'
 import { formatEventListItem, formatEventDetail, formatEventResult } from './calendar/format.js'
 import {
   listMessages,
@@ -537,9 +539,9 @@ server.addTool({
 server.addTool({
   name: 'gcal_list_events',
   description:
-    'List upcoming events from a calendar. ' +
-    'Returns events sorted by start time. ' +
-    'Use timeMin/timeMax to query a specific date range.',
+    'List upcoming events from one calendar, or several via calendarIds (merged, sorted by ' +
+    'start, tagged with calendar name). Use timeMin/timeMax to query a specific date range. ' +
+    'findDuplicates flags events on different calendars that overlap in time and have similar titles.',
   parameters: z.object({
     calendarId: calendarIdParam,
     timeMin: z
@@ -554,13 +556,34 @@ server.addTool({
       .describe('End of time range (ISO 8601). Omit to list upcoming events.'),
     maxResults: z.number().optional().default(10).describe('Max events to return (default: 10)'),
     query: z.string().optional().describe('Free text search across event fields'),
+    calendarIds: z
+      .array(z.string())
+      .optional()
+      .describe('List several calendars (IDs or names) at once; overrides calendarId'),
+    findDuplicates: z
+      .boolean()
+      .optional()
+      .describe(
+        'Add a "Possible duplicates" section (overlapping, similar titles, different calendars)',
+      ),
   }),
-  execute: async ({ calendarId, timeMin, timeMax, maxResults, query }) => {
-    const events = await listEvents(calendarId, timeMin, timeMax, maxResults, query)
+  execute: async ({
+    calendarId,
+    timeMin,
+    timeMax,
+    maxResults,
+    query,
+    calendarIds,
+    findDuplicates,
+  }) => {
+    const events = calendarIds?.length
+      ? await listEventsAcross(calendarIds, timeMin, timeMax, maxResults, query)
+      : await listEvents(calendarId, timeMin, timeMax, maxResults, query)
     if (events.length === 0) {
       return { content: [{ type: 'text' as const, text: 'No events found.' }] }
     }
     const lines = events.map(formatEventListItem)
+    if (findDuplicates) lines.push(formatDuplicates(findDuplicateGroups(events)))
     return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] }
   },
 })

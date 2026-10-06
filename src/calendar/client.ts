@@ -6,6 +6,7 @@ import {
   untilBeforeInstance,
   untilOnDate,
 } from './recurrence.js'
+import { eventTimeRange } from './format.js'
 
 // Detect system timezone, fallback to UTC
 function getDefaultTimeZone(): string {
@@ -501,4 +502,23 @@ export async function moveEvent(
 
   const response = await calendar.events.move({ calendarId, eventId, destination })
   return tagEvent(parseEvent(response.data), destination)
+}
+
+// List events from several calendars (IDs or names), merged and sorted by start time.
+// maxResults applies per calendar.
+export async function listEventsAcross(
+  calendarIdsOrNames: string[],
+  timeMin?: string,
+  timeMax?: string,
+  maxResults: number = 10,
+  query?: string,
+): Promise<EventInfo[]> {
+  const results = await Promise.all(
+    calendarIdsOrNames.map((c) => listEvents(c, timeMin, timeMax, maxResults, query)),
+  )
+  return results
+    .flat()
+    .map((e, i) => ({ e, i, start: eventTimeRange(e).start }))
+    .sort((a, b) => a.start - b.start || a.i - b.i)
+    .map(({ e }) => e)
 }
