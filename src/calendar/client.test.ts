@@ -522,8 +522,12 @@ describe('Google Calendar Client', () => {
         calendarId: 'primary',
         eventId: 'event-1',
         requestBody: expect.objectContaining({
-          start: { dateTime: '2025-06-15T14:00:00-04:00', timeZone: expect.any(String) },
-          end: { dateTime: '2025-06-15T15:00:00-04:00', timeZone: expect.any(String) },
+          start: {
+            dateTime: '2025-06-15T14:00:00-04:00',
+            timeZone: expect.any(String),
+            date: null,
+          },
+          end: { dateTime: '2025-06-15T15:00:00-04:00', timeZone: expect.any(String), date: null },
         }),
       })
     })
@@ -568,11 +572,63 @@ describe('Google Calendar Client', () => {
       expect(mockCalendarClient.events.update).toHaveBeenCalledWith(
         expect.objectContaining({
           requestBody: expect.objectContaining({
-            start: { date: '2025-06-15' },
-            end: { date: '2025-06-16' },
+            start: { date: '2025-06-15', dateTime: null, timeZone: null },
+            end: { date: '2025-06-16', dateTime: null, timeZone: null },
           }),
         }),
       )
+    })
+  })
+
+  describe('updateEvent all-day/timed switching', () => {
+    it('switches all-day to timed, nulling date', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({
+        data: createMockEvent({ start: { date: '2025-06-15' }, end: { date: '2025-06-16' } }),
+      })
+      mockCalendarClient.events.update.mockResolvedValue({ data: createMockEvent() })
+
+      await updateEvent('primary', 'event-1', {
+        start: '2025-06-15T10:00:00-04:00',
+        end: '2025-06-15T11:00:00-04:00',
+        timeZone: 'America/New_York',
+      })
+
+      const body = mockCalendarClient.events.update.mock.calls[0][0].requestBody
+      expect(body.start).toEqual({
+        dateTime: '2025-06-15T10:00:00-04:00',
+        timeZone: 'America/New_York',
+        date: null,
+      })
+      expect(body.end).toEqual({
+        dateTime: '2025-06-15T11:00:00-04:00',
+        timeZone: 'America/New_York',
+        date: null,
+      })
+    })
+
+    it('switches timed to all-day, nulling dateTime and timeZone', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({
+        data: createMockEvent({
+          start: { dateTime: '2025-06-15T10:00:00-04:00', timeZone: 'America/New_York' },
+          end: { dateTime: '2025-06-15T11:00:00-04:00', timeZone: 'America/New_York' },
+        }),
+      })
+      mockCalendarClient.events.update.mockResolvedValue({ data: createMockEvent() })
+
+      await updateEvent('primary', 'event-1', { start: '2025-06-15', end: '2025-06-16' })
+
+      const body = mockCalendarClient.events.update.mock.calls[0][0].requestBody
+      expect(body.start).toEqual({ date: '2025-06-15', dateTime: null, timeZone: null })
+      expect(body.end).toEqual({ date: '2025-06-16', dateTime: null, timeZone: null })
+    })
+
+    it('rejects changing only start to a different type than the existing end', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({ data: createMockEvent() })
+
+      await expect(updateEvent('primary', 'event-1', { start: '2025-06-15' })).rejects.toThrow(
+        /both start and end/,
+      )
+      expect(mockCalendarClient.events.update).not.toHaveBeenCalled()
     })
   })
 

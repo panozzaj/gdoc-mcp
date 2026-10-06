@@ -48,6 +48,14 @@ function isAllDayDate(dateStr: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
 }
 
+// Build an EventDateTime, explicitly nulling the field of the other kind so that switching
+// between all-day and timed on update is accepted by the Google API.
+function toEventDateTime(value: string, timeZone: string): calendar_v3.Schema$EventDateTime {
+  return isAllDayDate(value)
+    ? { date: value, dateTime: null, timeZone: null }
+    : { dateTime: value, timeZone, date: null }
+}
+
 function formatEventTime(eventTime: calendar_v3.Schema$EventDateTime | undefined): {
   display: string
   allDay: boolean
@@ -196,16 +204,15 @@ export async function updateEvent(
   if (updates.description !== undefined) requestBody.description = updates.description
   if (updates.location !== undefined) requestBody.location = updates.location
 
-  if (updates.start !== undefined) {
-    const startAllDay = isAllDayDate(updates.start)
-    requestBody.start = startAllDay
-      ? { date: updates.start }
-      : { dateTime: updates.start, timeZone }
-  }
+  if (updates.start !== undefined) requestBody.start = toEventDateTime(updates.start, timeZone)
+  if (updates.end !== undefined) requestBody.end = toEventDateTime(updates.end, timeZone)
 
-  if (updates.end !== undefined) {
-    const endAllDay = isAllDayDate(updates.end)
-    requestBody.end = endAllDay ? { date: updates.end } : { dateTime: updates.end, timeZone }
+  // Google rejects events whose start and end are of different kinds (date vs dateTime)
+  if (Boolean(requestBody.start?.date) !== Boolean(requestBody.end?.date)) {
+    throw new Error(
+      'Cannot mix all-day and timed start/end. When switching between all-day (YYYY-MM-DD) ' +
+        'and timed (ISO datetime), provide both start and end.',
+    )
   }
 
   if (updates.attendees !== undefined) {
