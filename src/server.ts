@@ -487,6 +487,15 @@ server.addTool({
 
 // ============ Google Calendar Tools ============
 
+const calendarIdParam = z
+  .string()
+  .optional()
+  .default('primary')
+  .describe(
+    'Calendar ID or display name (case-insensitive, e.g. "Family"). Default: primary. ' +
+      'Use gcal_list_calendars to see calendars.',
+  )
+
 server.addTool({
   name: 'gcal_list_calendars',
   description: 'List all calendars the user has access to (owned, subscribed, shared).',
@@ -514,11 +523,7 @@ server.addTool({
     'Returns events sorted by start time. ' +
     'Use timeMin/timeMax to query a specific date range.',
   parameters: z.object({
-    calendarId: z
-      .string()
-      .optional()
-      .default('primary')
-      .describe('Calendar ID (default: primary). Use gcal_list_calendars to find IDs.'),
+    calendarId: calendarIdParam,
     timeMin: z
       .string()
       .optional()
@@ -546,7 +551,7 @@ server.addTool({
   name: 'gcal_read_event',
   description: 'Get full details of a single calendar event.',
   parameters: z.object({
-    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    calendarId: calendarIdParam,
     eventId: z.string().describe('Event ID'),
   }),
   execute: async ({ calendarId, eventId }) => {
@@ -562,7 +567,7 @@ server.addTool({
     'For all-day events, use date format YYYY-MM-DD. ' +
     'For timed events, use ISO 8601 datetime.',
   parameters: z.object({
-    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    calendarId: calendarIdParam,
     summary: z.string().describe('Event title'),
     start: z.string().describe('Start time (ISO 8601 datetime or YYYY-MM-DD for all-day)'),
     end: z.string().describe('End time (ISO 8601 datetime or YYYY-MM-DD for all-day)'),
@@ -608,7 +613,7 @@ server.addTool({
   name: 'gcal_update_event',
   description: 'Update an existing calendar event. Only provided fields are changed.',
   parameters: z.object({
-    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    calendarId: calendarIdParam,
     eventId: z.string().describe('Event ID'),
     summary: z.string().optional().describe('New event title'),
     start: z.string().optional().describe('New start time'),
@@ -654,7 +659,7 @@ server.addTool({
   name: 'gcal_delete_event',
   description: 'Delete a calendar event.',
   parameters: z.object({
-    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    calendarId: calendarIdParam,
     eventId: z.string().describe('Event ID to delete'),
   }),
   execute: async ({ calendarId, eventId }) => {
@@ -672,7 +677,7 @@ server.addTool({
     'Google parses the text to extract date, time, and title. ' +
     'Example: "Lunch with Bob tomorrow at noon at Cafe Milano"',
   parameters: z.object({
-    calendarId: z.string().optional().default('primary').describe('Calendar ID'),
+    calendarId: calendarIdParam,
     text: z.string().describe('Natural language event description'),
   }),
   execute: async ({ calendarId, text }) => {

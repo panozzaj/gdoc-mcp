@@ -7,6 +7,8 @@ import {
   updateEvent,
   deleteEvent,
   quickAdd,
+  resolveCalendarId,
+  clearCalendarCache,
 } from './client.js'
 
 vi.mock('../auth.js', () => ({
@@ -58,6 +60,8 @@ describe('Google Calendar Client', () => {
     }
 
     vi.mocked(getCalendarClient).mockResolvedValue(mockCalendarClient as any)
+    mockCalendarClient.calendarList.list.mockResolvedValue({ data: { items: [] } })
+    clearCalendarCache()
   })
 
   describe('listCalendars', () => {
@@ -105,6 +109,83 @@ describe('Google Calendar Client', () => {
 
       const result = await listCalendars()
       expect(result[0]).toEqual({ id: '', summary: '(unnamed)', primary: false })
+    })
+  })
+
+  describe('calendar name resolution', () => {
+    beforeEach(() => {
+      mockCalendarClient.calendarList.list.mockResolvedValue({
+        data: {
+          items: [
+            { id: 'me@gmail.com', summary: 'me@gmail.com', primary: true },
+            { id: 'fam123@group.calendar.google.com', summary: 'Family' },
+            { id: 'kids@group.calendar.google.com', summary: 'Childcare' },
+          ],
+        },
+      })
+    })
+
+    it('resolves a display name case-insensitively', async () => {
+      expect(await resolveCalendarId('family')).toBe('fam123@group.calendar.google.com')
+      expect(await resolveCalendarId(' Childcare ')).toBe('kids@group.calendar.google.com')
+    })
+
+    it('passes through real IDs and primary', async () => {
+      expect(await resolveCalendarId('primary')).toBe('primary')
+      expect(await resolveCalendarId('fam123@group.calendar.google.com')).toBe(
+        'fam123@group.calendar.google.com',
+      )
+      expect(await resolveCalendarId('other@group.calendar.google.com')).toBe(
+        'other@group.calendar.google.com',
+      )
+    })
+
+    it('throws a helpful error for unknown names', async () => {
+      await expect(resolveCalendarId('Nope')).rejects.toThrow(/Unknown calendar "Nope".*Family/)
+    })
+
+    it('caches the calendar list per process', async () => {
+      await resolveCalendarId('Family')
+      await resolveCalendarId('Childcare')
+      expect(mockCalendarClient.calendarList.list).toHaveBeenCalledTimes(1)
+    })
+
+    it('uses the resolved ID for API calls and tags events with the calendar name', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({ data: createMockEvent() })
+
+      const result = await getEvent('Family', 'event-1')
+
+      expect(mockCalendarClient.events.get).toHaveBeenCalledWith({
+        calendarId: 'fam123@group.calendar.google.com',
+        eventId: 'event-1',
+      })
+      expect(result.calendarId).toBe('fam123@group.calendar.google.com')
+      expect(result.calendarName).toBe('Family')
+    })
+
+    it('names the primary calendar', async () => {
+      mockCalendarClient.events.list.mockResolvedValue({ data: { items: [createMockEvent()] } })
+      const result = await listEvents('primary')
+      expect(result[0].calendarName).toBe('me@gmail.com')
+    })
+
+    it('resolves names for create, update, delete, and quickAdd', async () => {
+      mockCalendarClient.events.insert.mockResolvedValue({ data: createMockEvent() })
+      mockCalendarClient.events.get.mockResolvedValue({ data: createMockEvent() })
+      mockCalendarClient.events.update.mockResolvedValue({ data: createMockEvent() })
+      mockCalendarClient.events.delete.mockResolvedValue({})
+      mockCalendarClient.events.quickAdd.mockResolvedValue({ data: createMockEvent() })
+      const famId = 'fam123@group.calendar.google.com'
+
+      await createEvent('Family', { summary: 'x', start: '2025-06-15', end: '2025-06-16' })
+      await updateEvent('Family', 'event-1', { summary: 'y' })
+      await deleteEvent('Family', 'event-1')
+      await quickAdd('Family', 'Lunch tomorrow')
+
+      expect(mockCalendarClient.events.insert.mock.calls[0][0].calendarId).toBe(famId)
+      expect(mockCalendarClient.events.update.mock.calls[0][0].calendarId).toBe(famId)
+      expect(mockCalendarClient.events.delete.mock.calls[0][0].calendarId).toBe(famId)
+      expect(mockCalendarClient.events.quickAdd.mock.calls[0][0].calendarId).toBe(famId)
     })
   })
 

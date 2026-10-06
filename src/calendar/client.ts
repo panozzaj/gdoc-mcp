@@ -87,6 +87,65 @@ function parseEvent(event: calendar_v3.Schema$Event): EventInfo {
   }
 }
 
+// Calendar list cache (per process) used to resolve display names to IDs and IDs to names
+let calendarCache: Promise<CalendarInfo[]> | null = null
+
+export function clearCalendarCache(): void {
+  calendarCache = null
+}
+
+function getCachedCalendars(): Promise<CalendarInfo[]> {
+  if (!calendarCache) {
+    calendarCache = listCalendars().catch((err) => {
+      calendarCache = null
+      throw err
+    })
+  }
+  return calendarCache
+}
+
+function looksLikeCalendarId(value: string): boolean {
+  return value === 'primary' || value.includes('@')
+}
+
+// Accept either a calendar ID or a display name (case-insensitive, e.g. "Family")
+export async function resolveCalendarId(nameOrId: string = 'primary'): Promise<string> {
+  const value = nameOrId.trim()
+  if (looksLikeCalendarId(value)) return value
+  const calendars = await getCachedCalendars()
+  const lower = value.toLowerCase()
+  const match =
+    calendars.find((c) => c.id === value) ||
+    calendars.find((c) => c.summary.toLowerCase() === lower)
+  if (match) return match.id
+  // Nothing to check against; let the API decide whether it's a valid ID
+  if (calendars.length === 0) return value
+  const names = calendars.map((c) => c.summary).join(', ')
+  throw new Error(`Unknown calendar "${value}". Available calendars: ${names}`)
+}
+
+export async function getCalendarName(calendarId: string): Promise<string | undefined> {
+  try {
+    const calendars = await getCachedCalendars()
+    const match =
+      calendarId === 'primary'
+        ? calendars.find((c) => c.primary)
+        : calendars.find((c) => c.id === calendarId)
+    return match?.summary
+  } catch {
+    return undefined
+  }
+}
+
+async function tagEvents(events: EventInfo[], calendarId: string): Promise<EventInfo[]> {
+  const calendarName = await getCalendarName(calendarId)
+  return events.map((e) => ({ ...e, calendarId, calendarName }))
+}
+
+async function tagEvent(event: EventInfo, calendarId: string): Promise<EventInfo> {
+  return (await tagEvents([event], calendarId))[0]
+}
+
 export async function listCalendars(): Promise<CalendarInfo[]> {
   const calendar = await getCalendarClient()
   const response = await calendar.calendarList.list()
@@ -116,12 +175,13 @@ function isAllDayEventInRange(event: EventInfo, timeMin?: string, timeMax?: stri
 }
 
 export async function listEvents(
-  calendarId: string = 'primary',
+  calendarIdOrName: string = 'primary',
   timeMin?: string,
   timeMax?: string,
   maxResults: number = 10,
   query?: string,
 ): Promise<EventInfo[]> {
+  const calendarId = await resolveCalendarId(calendarIdOrName)
   const calendar = await getCalendarClient()
 
   const params: calendar_v3.Params$Resource$Events$List = {
@@ -138,16 +198,18 @@ export async function listEvents(
   const response = await calendar.events.list(params)
   const events = response.data.items || []
 
-  return events.map(parseEvent).filter((event) => {
+  const parsed = events.map(parseEvent).filter((event) => {
     if (!event.allDay) return true
     return isAllDayEventInRange(event, timeMin, timeMax)
   })
+  return tagEvents(parsed, calendarId)
 }
 
 export async function getEvent(
-  calendarId: string = 'primary',
+  calendarIdOrName: string = 'primary',
   eventId: string,
 ): Promise<EventInfo> {
+  const calendarId = await resolveCalendarId(calendarIdOrName)
   const calendar = await getCalendarClient()
 
   const response = await calendar.events.get({
@@ -155,13 +217,14 @@ export async function getEvent(
     eventId,
   })
 
-  return parseEvent(response.data)
+  return tagEvent(parseEvent(response.data), calendarId)
 }
 
 export async function createEvent(
-  calendarId: string = 'primary',
+  calendarIdOrName: string = 'primary',
   event: EventInput,
 ): Promise<EventInfo> {
+  const calendarId = await resolveCalendarId(calendarIdOrName)
   const calendar = await getCalendarClient()
   const timeZone = event.timeZone || getDefaultTimeZone()
 
@@ -185,14 +248,15 @@ export async function createEvent(
     requestBody,
   })
 
-  return parseEvent(response.data)
+  return tagEvent(parseEvent(response.data), calendarId)
 }
 
 export async function updateEvent(
-  calendarId: string = 'primary',
+  calendarIdOrName: string = 'primary',
   eventId: string,
   updates: Partial<EventInput>,
 ): Promise<EventInfo> {
+  const calendarId = await resolveCalendarId(calendarIdOrName)
   const calendar = await getCalendarClient()
   const timeZone = updates.timeZone || getDefaultTimeZone()
 
@@ -225,15 +289,23 @@ export async function updateEvent(
     requestBody,
   })
 
-  return parseEvent(response.data)
+  return tagEvent(parseEvent(response.data), calendarId)
 }
 
-export async function deleteEvent(calendarId: string = 'primary', eventId: string): Promise<void> {
+export async function deleteEvent(
+  calendarIdOrName: string = 'primary',
+  eventId: string,
+): Promise<void> {
+  const calendarId = await resolveCalendarId(calendarIdOrName)
   const calendar = await getCalendarClient()
   await calendar.events.delete({ calendarId, eventId })
 }
 
-export async function quickAdd(calendarId: string = 'primary', text: string): Promise<EventInfo> {
+export async function quickAdd(
+  calendarIdOrName: string = 'primary',
+  text: string,
+): Promise<EventInfo> {
+  const calendarId = await resolveCalendarId(calendarIdOrName)
   const calendar = await getCalendarClient()
 
   const response = await calendar.events.quickAdd({
@@ -241,5 +313,5 @@ export async function quickAdd(calendarId: string = 'primary', text: string): Pr
     text,
   })
 
-  return parseEvent(response.data)
+  return tagEvent(parseEvent(response.data), calendarId)
 }
