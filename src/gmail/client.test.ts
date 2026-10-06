@@ -416,6 +416,55 @@ describe('Gmail Client', () => {
       const decoded = Buffer.from(call.requestBody.message.raw, 'base64url').toString('utf-8')
       expect(decoded).toContain('Bcc: secret@example.com')
     })
+
+    // Gmail hard-wraps text/plain-only messages at ~78 chars on send, so the
+    // body also goes out as HTML, which Gmail sends without re-wrapping
+    it('sends the body as multipart/alternative with plain and HTML parts', async () => {
+      mockGmailClient.users.drafts.create.mockResolvedValue({
+        data: {
+          id: 'draft-1',
+          message: { id: 'draft-msg-1', threadId: 'thread-1' },
+        },
+      })
+
+      await createDraft(
+        'bob@example.com',
+        'Hello',
+        'Hi Bob,\n\nA <b> & "c"\nnext line\n\nThanks,\nMe',
+      )
+
+      const call = mockGmailClient.users.drafts.create.mock.calls[0][0]
+      const decoded = Buffer.from(call.requestBody.message.raw, 'base64url').toString('utf-8')
+      expect(decoded).toContain('Content-Type: multipart/alternative; boundary=')
+      expect(decoded).toContain('Content-Type: text/plain; charset="UTF-8"')
+      expect(decoded).toContain('Content-Type: text/html; charset="UTF-8"')
+      expect(decoded).toContain('A <b> & "c"\nnext line')
+      expect(decoded).toContain(
+        '<div>Hi Bob,</div><div><br></div><div>A &lt;b&gt; &amp; &quot;c&quot;</div><div>next line</div><div><br></div><div>Thanks,</div><div>Me</div>',
+      )
+    })
+
+    it('nests the alternative body inside multipart/mixed when attaching files', async () => {
+      mockGmailClient.users.drafts.create.mockResolvedValue({
+        data: {
+          id: 'draft-1',
+          message: { id: 'draft-msg-1', threadId: 'thread-1' },
+        },
+      })
+      const tmpFile = './tmp/a.txt'
+      fs.mkdirSync('./tmp', { recursive: true })
+      fs.writeFileSync(tmpFile, 'file data')
+
+      await createDraft('bob@example.com', 'Hello', 'Hi!', undefined, undefined, [tmpFile])
+      fs.unlinkSync(tmpFile)
+
+      const call = mockGmailClient.users.drafts.create.mock.calls[0][0]
+      const decoded = Buffer.from(call.requestBody.message.raw, 'base64url').toString('utf-8')
+      expect(decoded).toContain('Content-Type: multipart/mixed; boundary=')
+      expect(decoded).toContain('Content-Type: multipart/alternative; boundary=')
+      expect(decoded).toContain('<div>Hi!</div>')
+      expect(decoded).toContain('Content-Disposition: attachment; filename="a.txt"')
+    })
   })
 
   describe('createReplyDraft', () => {

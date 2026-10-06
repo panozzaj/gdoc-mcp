@@ -147,6 +147,42 @@ function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] || 'application/octet-stream'
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+// Mirrors Gmail's own compose markup: one <div> per line, <div><br></div> for blank lines
+function plainTextToHtml(body: string): string {
+  return body
+    .split(/\r?\n/)
+    .map((line) => (line === '' ? '<div><br></div>' : `<div>${escapeHtml(line)}</div>`))
+    .join('')
+}
+
+// Gmail hard-wraps text/plain-only messages at ~78 chars when they are sent.
+// Including an HTML alternative makes Gmail treat the draft as rich text, so
+// paragraphs reach the recipient unwrapped.
+function buildAlternativeBody(body: string): string {
+  const boundary = `alt_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  return [
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    '',
+    body,
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    '',
+    plainTextToHtml(body),
+    `--${boundary}--`,
+  ].join('\r\n')
+}
+
 function buildRawMessage(
   to: string,
   subject: string,
@@ -167,9 +203,7 @@ function buildRawMessage(
   const hasEmbeddedAttachments = embeddedAttachments && embeddedAttachments.length > 0
 
   if (!hasFileAttachments && !hasEmbeddedAttachments) {
-    headerLines.push('Content-Type: text/plain; charset="UTF-8"')
-    headerLines.push('', body)
-    const raw = headerLines.join('\r\n')
+    const raw = headerLines.join('\r\n') + '\r\n' + buildAlternativeBody(body)
     return Buffer.from(raw).toString('base64url')
   }
 
@@ -180,11 +214,9 @@ function buildRawMessage(
 
   const parts: string[] = []
 
-  // Text body part
+  // Body part (plain + HTML alternatives)
   parts.push(`--${boundary}`)
-  parts.push('Content-Type: text/plain; charset="UTF-8"')
-  parts.push('')
-  parts.push(body)
+  parts.push(buildAlternativeBody(body))
 
   // File attachment parts
   if (hasFileAttachments) {
