@@ -34,6 +34,7 @@ import {
   deleteEvent,
   quickAdd,
 } from './calendar/client.js'
+import { formatEventListItem, formatEventDetail, formatEventResult } from './calendar/format.js'
 import {
   listMessages,
   listDrafts,
@@ -536,13 +537,7 @@ server.addTool({
     if (events.length === 0) {
       return { content: [{ type: 'text' as const, text: 'No events found.' }] }
     }
-    const lines = events.map((e) => {
-      let line = `- **${e.summary}**\n  ${e.allDay ? 'All day' : `${e.start} → ${e.end}`}`
-      if (e.location) line += `\n  Location: ${e.location}`
-      if (e.meetLink) line += `\n  Meet: ${e.meetLink}`
-      line += `\n  ID: ${e.id}`
-      return line
-    })
+    const lines = events.map(formatEventListItem)
     return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] }
   },
 })
@@ -556,18 +551,7 @@ server.addTool({
   }),
   execute: async ({ calendarId, eventId }) => {
     const e = await getEvent(calendarId, eventId)
-    const parts = [
-      `**${e.summary}**`,
-      e.allDay ? `All day: ${e.start}` : `Start: ${e.start}\nEnd: ${e.end}`,
-    ]
-    if (e.location) parts.push(`Location: ${e.location}`)
-    if (e.description) parts.push(`Description: ${e.description}`)
-    if (e.attendees?.length) parts.push(`Attendees: ${e.attendees.join(', ')}`)
-    if (e.meetLink) parts.push(`Meet: ${e.meetLink}`)
-    if (e.htmlLink) parts.push(`Link: ${e.htmlLink}`)
-    parts.push(`Status: ${e.status || 'confirmed'}`)
-    parts.push(`ID: ${e.id}`)
-    return { content: [{ type: 'text' as const, text: parts.join('\n') }] }
+    return { content: [{ type: 'text' as const, text: formatEventDetail(e) }] }
   },
 })
 
@@ -613,7 +597,7 @@ server.addTool({
       content: [
         {
           type: 'text' as const,
-          text: `Created event "${event.summary}"\nStart: ${event.start}\nEnd: ${event.end}\nID: ${event.id}${event.htmlLink ? `\nLink: ${event.htmlLink}` : ''}`,
+          text: formatEventResult('Created', event),
         },
       ],
     }
@@ -659,7 +643,7 @@ server.addTool({
       content: [
         {
           type: 'text' as const,
-          text: `Updated event "${event.summary}"\nStart: ${event.start}\nEnd: ${event.end}\nID: ${event.id}`,
+          text: formatEventResult('Updated', event),
         },
       ],
     }
@@ -697,7 +681,7 @@ server.addTool({
       content: [
         {
           type: 'text' as const,
-          text: `Created event "${event.summary}"\nStart: ${event.start}\nEnd: ${event.end}\nID: ${event.id}`,
+          text: formatEventResult('Created', event),
         },
       ],
     }

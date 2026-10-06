@@ -28,6 +28,10 @@ export interface EventInfo {
   htmlLink?: string
   status?: string
   allDay: boolean
+  recurrence?: string[]
+  recurringEventId?: string
+  calendarId?: string
+  calendarName?: string
 }
 
 export interface EventInput {
@@ -70,6 +74,8 @@ function parseEvent(event: calendar_v3.Schema$Event): EventInfo {
     htmlLink: event.htmlLink || undefined,
     status: event.status || undefined,
     allDay: start.allDay,
+    recurrence: event.recurrence?.length ? event.recurrence : undefined,
+    recurringEventId: event.recurringEventId || undefined,
   }
 }
 

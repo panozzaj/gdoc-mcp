@@ -338,6 +338,19 @@ describe('Google Calendar Client', () => {
   })
 
   describe('getEvent', () => {
+    it('exposes recurrence and recurringEventId', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({
+        data: createMockEvent({
+          recurrence: ['RRULE:FREQ=WEEKLY'],
+          recurringEventId: 'master-1',
+        }),
+      })
+
+      const result = await getEvent('primary', 'event-1')
+      expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY'])
+      expect(result.recurringEventId).toBe('master-1')
+    })
+
     it('returns full event details', async () => {
       mockCalendarClient.events.get.mockResolvedValue({
         data: createMockEvent({
