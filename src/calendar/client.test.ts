@@ -9,6 +9,7 @@ import {
   quickAdd,
   resolveCalendarId,
   clearCalendarCache,
+  moveEvent,
 } from './client.js'
 
 vi.mock('../auth.js', () => ({
@@ -41,6 +42,7 @@ describe('Google Calendar Client', () => {
       update: ReturnType<typeof vi.fn>
       delete: ReturnType<typeof vi.fn>
       quickAdd: ReturnType<typeof vi.fn>
+      move: ReturnType<typeof vi.fn>
     }
   }
 
@@ -56,6 +58,7 @@ describe('Google Calendar Client', () => {
         update: vi.fn(),
         delete: vi.fn(),
         quickAdd: vi.fn(),
+        move: vi.fn(),
       },
     }
 
@@ -734,6 +737,56 @@ describe('Google Calendar Client', () => {
         calendarId: 'primary',
         eventId: 'event-1',
       })
+    })
+  })
+
+  describe('moveEvent', () => {
+    beforeEach(() => {
+      mockCalendarClient.calendarList.list.mockResolvedValue({
+        data: {
+          items: [
+            { id: 'me@gmail.com', summary: 'Personal', primary: true },
+            { id: 'fam@group.calendar.google.com', summary: 'Family' },
+          ],
+        },
+      })
+    })
+
+    it('moves an event to another calendar, resolving names', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({ data: createMockEvent() })
+      mockCalendarClient.events.move.mockResolvedValue({ data: createMockEvent() })
+
+      const result = await moveEvent('primary', 'event-1', 'Family')
+
+      expect(mockCalendarClient.events.move).toHaveBeenCalledWith({
+        calendarId: 'primary',
+        eventId: 'event-1',
+        destination: 'fam@group.calendar.google.com',
+      })
+      expect(result.calendarName).toBe('Family')
+    })
+
+    it('moves a series master', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({
+        data: createMockEvent({ id: 'series1', recurrence: ['RRULE:FREQ=WEEKLY'] }),
+      })
+      mockCalendarClient.events.move.mockResolvedValue({
+        data: createMockEvent({ id: 'series1', recurrence: ['RRULE:FREQ=WEEKLY'] }),
+      })
+
+      const result = await moveEvent('primary', 'series1', 'Family')
+      expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY'])
+    })
+
+    it('rejects a recurring instance with a pointer to the series ID', async () => {
+      mockCalendarClient.events.get.mockResolvedValue({
+        data: createMockEvent({ id: 'series1_20261009T140000Z', recurringEventId: 'series1' }),
+      })
+
+      await expect(moveEvent('primary', 'series1_20261009T140000Z', 'Family')).rejects.toThrow(
+        /instance of recurring series "series1".*whole series/s,
+      )
+      expect(mockCalendarClient.events.move).not.toHaveBeenCalled()
     })
   })
 

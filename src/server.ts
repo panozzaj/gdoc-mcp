@@ -33,6 +33,7 @@ import {
   updateEvent,
   deleteEvent,
   quickAdd,
+  moveEvent,
 } from './calendar/client.js'
 import { formatEventListItem, formatEventDetail, formatEventResult } from './calendar/format.js'
 import {
@@ -667,6 +668,24 @@ server.addTool({
     return {
       content: [{ type: 'text' as const, text: `Deleted event ${eventId}` }],
     }
+  },
+})
+
+server.addTool({
+  name: 'gcal_move_event',
+  description:
+    'Move an event to a different calendar (changes its organizer calendar). ' +
+    'For recurring events, pass the series (master) ID to move the whole series; ' +
+    'instance IDs (e.g. "abc_20261009T140000Z") cannot be moved individually and return an error ' +
+    'naming the series ID.',
+  parameters: z.object({
+    calendarId: calendarIdParam,
+    eventId: z.string().describe('Event ID (or series master ID for recurring events)'),
+    destinationCalendarId: z.string().describe('Destination calendar ID or display name'),
+  }),
+  execute: async ({ calendarId, eventId, destinationCalendarId }) => {
+    const event = await moveEvent(calendarId, eventId, destinationCalendarId)
+    return { content: [{ type: 'text' as const, text: formatEventResult('Moved', event) }] }
   },
 })
 

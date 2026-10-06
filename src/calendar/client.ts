@@ -315,3 +315,29 @@ export async function quickAdd(
 
   return tagEvent(parseEvent(response.data), calendarId)
 }
+
+// Move an event (or a whole recurring series, via its master ID) to another calendar.
+// Google only allows moving series masters, not individual instances.
+export async function moveEvent(
+  calendarIdOrName: string = 'primary',
+  eventId: string,
+  destinationCalendarIdOrName: string,
+): Promise<EventInfo> {
+  const calendarId = await resolveCalendarId(calendarIdOrName)
+  const destination = await resolveCalendarId(destinationCalendarIdOrName)
+  const calendar = await getCalendarClient()
+
+  const existing = await calendar.events.get({ calendarId, eventId })
+  const masterId = existing.data.recurringEventId
+  if (masterId) {
+    throw new Error(
+      `Event ${eventId} is an instance of recurring series "${masterId}". ` +
+        `Google cannot move a single instance. To move the whole series, call move with ` +
+        `eventId "${masterId}". To move just this occurrence, delete it here (scope 'instance') ` +
+        `and create a copy on the destination calendar.`,
+    )
+  }
+
+  const response = await calendar.events.move({ calendarId, eventId, destination })
+  return tagEvent(parseEvent(response.data), destination)
+}
